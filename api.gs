@@ -89,6 +89,15 @@ var SHEET_HEADERS = {
     'SOURCE', 'SOURCE URL', 'TARGET INDUSTRY', 'POSSIBLE REQUIREMENTS', 'LEAD STATUS',
     'PROSPECTING START DATE', 'PROSPECTING STATUS', 'NOTES',
     'CREATED BY', 'CREATED AT', 'UPDATED BY', 'UPDATED AT', 'DELETED'
+  ],
+  // Clean phone-number support table (one number per row). COMPANY MASTER
+  // stays the main company database; this sheet only supplies callable numbers.
+  // Shared across DEMO/LIVE like COMPANY MASTER (it derives from it).
+  'COMPANY CONTACT NUMBERS': [
+    'CONTACT NUMBER ID', 'COMPANY ID', 'COMPANY NAME', 'SOURCE FIELD', 'ORIGINAL TEXT',
+    'CONTACT TYPE', 'RAW NUMBER', 'NORMALIZED NUMBER', 'DIAL NUMBER', 'DISPLAY NUMBER',
+    'EXTENSION', 'IS MOBILE', 'IS LANDLINE', 'IS_VALID', 'VALIDATION STATUS',
+    'VALIDATION NOTE', 'PRIMARY NUMBER', 'CREATED AT', 'UPDATED AT'
   ]
 };
 
@@ -165,7 +174,12 @@ function routes_() {
     // activity
     'logBreadcrumb': apiLogBreadcrumb_,
     'getCompanyEditHistory': apiCompanyEditHistory_,
-    'resetDemoActivity': apiResetDemoActivity_
+    'resetDemoActivity': apiResetDemoActivity_,
+    // phone cleanup layer
+    'syncCompanyContactNumbers': apiSyncContactNumbers_,
+    'getCompanyContactNumbers': apiGetCompanyContactNumbers_,
+    'getPrimaryPhone': apiGetPrimaryPhone_,
+    'getPhoneCleanupReport': apiGetPhoneCleanupReport_
   };
 }
 
@@ -557,8 +571,10 @@ function apiGetCallQueue_(p) {
     c.lastCallDate = s ? cellStr_(s['LAST CALL DATE']) : '';
     c.attemptCount = s ? Number(s['ATTEMPT COUNT'] || 0) : 0;
     c.alreadyAdded = !!myPending[c.companyId];
+    c.originalPhone = c.phone; // raw cell preserved for reference; never dialed
     return c;
   });
+  attachPrimaryPhoneInfoToCompanyRows_(companies);
 
   return {
     ok: true, count: companies.length, sheet: 'COMPANY MASTER', mode: mode,
@@ -637,6 +653,7 @@ function apiGetDailyActions_(p) {
   var agent = String(p.agent || '').trim().toUpperCase();
   var rows = readAll_(sheet_(modeSheetName_('DAILY ACTION LIST', mode))).rows.map(targetJson_);
   if (agent && agent !== 'ALL') rows = rows.filter(function (t) { return t.agent === agent; });
+  attachPrimaryPhoneInfoToActionRows_(rows);
   return { ok: true, count: rows.length, sheet: modeSheetName_('DAILY ACTION LIST', mode), targets: rows };
 }
 
@@ -646,6 +663,7 @@ function apiGetMyActions_(p) {
   var rows = readAll_(sheet_(modeSheetName_('DAILY ACTION LIST', mode))).rows
     .map(targetJson_)
     .filter(function (t) { return t.agent === user && t.status === 'PENDING'; });
+  attachPrimaryPhoneInfoToActionRows_(rows);
   return { ok: true, count: rows.length, sheet: modeSheetName_('DAILY ACTION LIST', mode), targets: rows };
 }
 
@@ -867,6 +885,7 @@ function apiGetCallHistory_(p) {
     .filter(function (c) { return c.companyId === companyId; })
     .sort(function (a, b) { return (b.when ? b.when.getTime() : 0) - (a.when ? a.when.getTime() : 0); })
     .map(stripWhen_);
+  attachPrimaryPhoneInfoToCallRows_(history);
   return { ok: true, count: history.length, sheet: modeSheetName_('CALL LOG', mode), history: history };
 }
 
@@ -951,6 +970,12 @@ function apiAgentDashboard_(p) {
   var needsAction = targets.filter(function (t) {
     return t.attempts > 0 && RETRY_RESULTS[(t.lastResult || '').toUpperCase()];
   });
+
+  attachPrimaryPhoneInfoToActionRows_(targets);
+  attachPrimaryPhoneInfoToActionRows_(needsAction);
+  attachPrimaryPhoneInfoToCallRows_(followups);
+  attachPrimaryPhoneInfoToCallRows_(meetings);
+  attachPrimaryPhoneInfoToCallRows_(todayCalls);
 
   var completedToday = todayCalls.length;
   return {
@@ -1050,8 +1075,11 @@ function apiManagerDashboard_(p) {
     if (u && (!lastAct[u] || ts > lastAct[u])) lastAct[u] = ts;
   });
 
+  for (var lk in lists) attachPrimaryPhoneInfoToCallRows_(lists[lk]);
+
   var snapshot = agentStatsFromCalls_(ranged, lastAct);
   var attention = computeAttention_(mode, agent || null);
+  attachPrimaryPhoneInfoToCallRows_(attention);
 
   var insights = [];
   if (kpis.callsLogged === 0) {
@@ -1401,4 +1429,345 @@ function apiResetDemoActivity_(p) {
   });
   breadcrumb_('DEMO', by.code, 'DEMO RESET', '', '', 'Demo data cleared');
   return { ok: true, message: 'Demo data cleared. LIVE sheets and COMPANY MASTER untouched.', cleared: cleared };
+}
+
+/* ====================================================================== */
+/* PHONE CLEANUP LAYER — COMPANY CONTACT NUMBERS                          */
+/* COMPANY MASTER remains the main company database. This module only     */
+/* extracts, normalizes and validates Philippine phone numbers into the   */
+/* COMPANY CONTACT NUMBERS sheet (one clean number per row) and attaches  */
+/* primary-phone info to rows returned by existing routes. Original       */
+/* phone cells in COMPANY MASTER are never modified.                      */
+/* ====================================================================== */
+
+var CONTACT_SHEET = 'COMPANY CONTACT NUMBERS';
+
+// Master fields scanned for numbers, in dedup-priority order (first hit wins).
+var PHONE_SOURCE_FIELDS = [
+  'MOBILE', 'CELLPHONE', 'CELL', 'PHONE', 'PHONE / MOBILE', 'CONTACT NUMBER',
+  'TEL', 'TELEPHONE', 'LANDLINE', 'PRIMARY CONTACT',
+  'OTHER CONTACTS', 'OTHER CONTACTS & EMAILS', 'EMAIL / CONTACT INFO'
+];
+
+// Cache: the contact sheet is read at most once per request.
+var PHONE_MAP_CACHE = null;
+
+/* --------------------------- pure helpers ----------------------------- */
+
+// Extract candidate numbers from one messy cell.
+// Returns [{raw, digits, extension}]. Original text is preserved by caller.
+function extractPhoneNumbersFromText_(text) {
+  var out = [];
+  var t = String(text == null ? '' : text);
+  if (!t.replace(/\s/g, '')) return out;
+  var segments = t.split(/[\/,;|\n•]+|\bor\b/i);
+  for (var s = 0; s < segments.length; s++) {
+    var seg = segments[s];
+    // pull out an extension (loc / local / ext / extension) before parsing
+    var ext = '';
+    var extM = seg.match(/(?:\bloc(?:al)?\b|\bext(?:ension)?\b)\.?\s*:?\s*(\d{1,6})/i);
+    if (extM) { ext = extM[1]; seg = seg.replace(extM[0], ' '); }
+    // strip label words so "Tel:", "Mobile:" etc. never reach the number
+    seg = seg.replace(/\b(tel(?:ephone)?|telefax|fax|mobile|cell(?:phone)?|contact(?:\s*(?:no|number|#))?|trunk\s*line|trunkline|landline|phone|viber|smart|globe|sun|tm|dito|direct\s*line|hotline|number|nos?)\b\.?:?/gi, ' ');
+    var matches = seg.match(/\+?\d[\d\s().\-]*\d/g) || [];
+    for (var m = 0; m < matches.length; m++) {
+      var raw = matches[m].replace(/^\s+|\s+$/g, '');
+      var digits = raw.replace(/\D/g, '');
+      if (digits.length < 7) continue; // noise (years, counts, short codes)
+      if (digits.length <= 13) {
+        out.push({ raw: raw, digits: digits, extension: ext });
+      } else {
+        // Two+ numbers ran together (space-separated in one segment):
+        // recover well-formed PH numbers from the digit stream.
+        var rec = digits.match(/639\d{9}|09\d{9}|02\d{8}|0[3-8]\d{8}/g) || [];
+        for (var r = 0; r < rec.length; r++) {
+          out.push({ raw: rec[r], digits: rec[r], extension: ext });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Normalize a digit string per Philippine standards.
+// Returns {normalized, dial, display, type, status, note}.
+function normalizePhilippinePhone_(rawDigits) {
+  var d = String(rawDigits == null ? '' : rawDigits).replace(/\D/g, '');
+  var note = '';
+  if (d.indexOf('0063') === 0) d = '63' + d.slice(4);
+  if (d.indexOf('63') === 0) {
+    if (d.length === 12 && d.charAt(2) === '9') d = '0' + d.slice(2);      // +639XXXXXXXXX
+    else if (d.length === 11 && d.charAt(2) === '2') d = '0' + d.slice(2); // +632XXXXXXXX (Metro Manila)
+    else if (d.length === 12 && '345678'.indexOf(d.charAt(2)) !== -1) d = '0' + d.slice(2); // +63XX provincial
+  }
+  if (/^9\d{9}$/.test(d)) { d = '0' + d; note = 'Inferred missing leading 0'; }
+  if (/^09\d{9}$/.test(d)) {
+    return { normalized: d, dial: '+63' + d.slice(1),
+      display: d.slice(0, 4) + ' ' + d.slice(4, 7) + ' ' + d.slice(7),
+      type: 'MOBILE', status: 'VALID', note: note };
+  }
+  if (/^02\d{8}$/.test(d)) {
+    return { normalized: d, dial: d,
+      display: '(02) ' + d.slice(2, 6) + ' ' + d.slice(6),
+      type: 'LANDLINE', status: 'VALID', note: note };
+  }
+  if (/^0[3-8]\d{8}$/.test(d)) { // provincial: 3-digit area code + 7 digits
+    return { normalized: d, dial: d,
+      display: '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + ' ' + d.slice(6),
+      type: 'LANDLINE', status: 'VALID', note: note };
+  }
+  if (/^\d{8}$/.test(d)) {
+    return { normalized: d, dial: d, display: d.slice(0, 4) + ' ' + d.slice(4),
+      type: 'LANDLINE', status: 'REVIEW', note: 'Possible landline but missing area code' };
+  }
+  if (/^\d{7}$/.test(d)) {
+    return { normalized: d, dial: d, display: d.slice(0, 3) + ' ' + d.slice(3),
+      type: 'LANDLINE', status: 'REVIEW', note: 'Possible landline but missing area code' };
+  }
+  return { normalized: d, dial: '', display: d, type: 'UNKNOWN', status: 'INVALID', note: 'Unrecognized number format' };
+}
+
+function detectPhoneType_(normalized) {
+  return normalizePhilippinePhone_(normalized).type;
+}
+
+function formatPhoneDisplay_(normalized, type) {
+  var n = normalizePhilippinePhone_(normalized);
+  return n.display || String(normalized || '');
+}
+
+/* ------------------------------- sync ---------------------------------- */
+
+function syncCompanyContactNumbers_() {
+  var master = readAll_(companyMasterSheet_());
+  var sh = sheet_(CONTACT_SHEET);
+  var existing = readAll_(sh);
+  var existingByKey = {};
+  var maxId = 0;
+  existing.rows.forEach(function (r) {
+    existingByKey[cellStr_(r['COMPANY ID']) + '|' + cellStr_(r['NORMALIZED NUMBER'])] = r;
+    var m = String(r['CONTACT NUMBER ID'] || '').match(/^CN-(\d+)$/);
+    if (m) maxId = Math.max(maxId, Number(m[1]));
+  });
+
+  var stats = {
+    companiesScanned: 0, numbersExtracted: 0, validNumbers: 0, reviewNumbers: 0,
+    invalidNumbers: 0, duplicateNumbersSkipped: 0, companiesWithNoNumber: 0
+  };
+  var now = nowStr_();
+  var outRows = [];
+
+  master.rows.forEach(function (r) {
+    var companyId = cellStr_(r['COMPANY ID']);
+    if (!companyId) return;
+    var companyName = cellStr_(r['COMPANY NAME']);
+    stats.companiesScanned++;
+    var seen = {};
+    var found = [];
+    PHONE_SOURCE_FIELDS.forEach(function (field) {
+      var text = cellStr_(r[field]);
+      if (!text) return;
+      extractPhoneNumbersFromText_(text).forEach(function (cand) {
+        var n = normalizePhilippinePhone_(cand.digits);
+        if (!n.normalized) return;
+        if (seen[n.normalized]) { stats.duplicateNumbersSkipped++; return; }
+        seen[n.normalized] = true;
+        var note = n.note;
+        if (cand.extension) {
+          note = note ? note + '; extension detected: ' + cand.extension
+                      : 'Extension detected: ' + cand.extension;
+        }
+        found.push({ sourceField: field, originalText: text, raw: cand.raw, ext: cand.extension || '', n: n, note: note });
+      });
+    });
+    if (!found.length) { stats.companiesWithNoNumber++; return; }
+
+    // Primary: first valid mobile → first valid landline → first REVIEW landline.
+    var primary = null;
+    for (var i = 0; i < found.length && !primary; i++) {
+      if (found[i].n.status === 'VALID' && found[i].n.type === 'MOBILE') primary = found[i];
+    }
+    for (var j = 0; j < found.length && !primary; j++) {
+      if (found[j].n.status === 'VALID' && found[j].n.type === 'LANDLINE') primary = found[j];
+    }
+    for (var k = 0; k < found.length && !primary; k++) {
+      if (found[k].n.status === 'REVIEW' && found[k].n.type === 'LANDLINE') {
+        primary = found[k];
+        primary.note = primary.note ? primary.note + '; primary by fallback (needs review)' : 'Primary by fallback (needs review)';
+      }
+    }
+
+    found.forEach(function (c) {
+      stats.numbersExtracted++;
+      if (c.n.status === 'VALID') stats.validNumbers++;
+      else if (c.n.status === 'REVIEW') stats.reviewNumbers++;
+      else stats.invalidNumbers++;
+      var ex = existingByKey[companyId + '|' + c.n.normalized];
+      var id = ex ? cellStr_(ex['CONTACT NUMBER ID']) : 'CN-' + ('000000' + (++maxId)).slice(-6);
+      outRows.push([
+        id, companyId, companyName, c.sourceField, c.originalText,
+        c.n.type, c.raw, c.n.normalized, c.n.dial, c.n.display,
+        c.ext, c.n.type === 'MOBILE' ? 'TRUE' : 'FALSE', c.n.type === 'LANDLINE' ? 'TRUE' : 'FALSE',
+        c.n.status === 'VALID' ? 'TRUE' : 'FALSE', c.n.status, c.note,
+        c === primary ? 'TRUE' : 'FALSE',
+        ex ? (cellStr_(ex['CREATED AT']) || now) : now, now
+      ]);
+    });
+  });
+
+  var lastRow = sh.getLastRow();
+  if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, sh.getMaxColumns()).clearContent();
+  if (outRows.length) {
+    // Force text format BEFORE writing: otherwise Sheets coerces digit-only
+    // values to numbers, stripping leading zeros (0288888888 → 288888888)
+    // and the + from +63 dial numbers.
+    sh.getRange(2, 1, outRows.length, outRows[0].length)
+      .setNumberFormat('@')
+      .setValues(outRows);
+  }
+  PHONE_MAP_CACHE = null;
+  return stats;
+}
+
+/* ------------------------- lookups & report ---------------------------- */
+
+function contactNumberJson_(r) {
+  return {
+    contactNumberId: cellStr_(r['CONTACT NUMBER ID']),
+    companyId: cellStr_(r['COMPANY ID']),
+    companyName: cellStr_(r['COMPANY NAME']),
+    sourceField: cellStr_(r['SOURCE FIELD']),
+    originalText: cellStr_(r['ORIGINAL TEXT']),
+    contactType: cellStr_(r['CONTACT TYPE']),
+    rawNumber: cellStr_(r['RAW NUMBER']),
+    normalizedNumber: cellStr_(r['NORMALIZED NUMBER']),
+    dialNumber: cellStr_(r['DIAL NUMBER']),
+    displayNumber: cellStr_(r['DISPLAY NUMBER']),
+    extension: cellStr_(r['EXTENSION']),
+    isMobile: String(r['IS MOBILE']).toUpperCase() === 'TRUE',
+    isLandline: String(r['IS LANDLINE']).toUpperCase() === 'TRUE',
+    isValid: String(r['IS_VALID']).toUpperCase() === 'TRUE',
+    validationStatus: cellStr_(r['VALIDATION STATUS']).toUpperCase(),
+    validationNote: cellStr_(r['VALIDATION NOTE']),
+    primaryNumber: String(r['PRIMARY NUMBER']).toUpperCase() === 'TRUE'
+  };
+}
+
+function getCompanyContactNumbers_(companyId) {
+  return readAll_(sheet_(CONTACT_SHEET)).rows
+    .map(contactNumberJson_)
+    .filter(function (n) { return n.companyId === companyId; });
+}
+
+function getPrimaryPhoneForCompany_(companyId) {
+  var nums = getCompanyContactNumbers_(companyId);
+  for (var i = 0; i < nums.length; i++) if (nums[i].primaryNumber) return nums[i];
+  for (var j = 0; j < nums.length; j++) if (nums[j].validationStatus === 'VALID') return nums[j];
+  return null;
+}
+
+function getPhoneCleanupReport_() {
+  var master = readAll_(companyMasterSheet_());
+  var totalCompanies = master.rows.filter(function (r) { return cellStr_(r['COMPANY ID']); }).length;
+  var nums = readAll_(sheet_(CONTACT_SHEET)).rows.map(contactNumberJson_);
+  var byCompany = {};
+  var valid = 0, review = 0, invalid = 0;
+  nums.forEach(function (n) {
+    byCompany[n.companyId] = (byCompany[n.companyId] || 0) + 1;
+    if (n.validationStatus === 'VALID') valid++;
+    else if (n.validationStatus === 'REVIEW') review++;
+    else invalid++;
+  });
+  var withNumbers = 0, multi = 0;
+  for (var id in byCompany) { withNumbers++; if (byCompany[id] > 1) multi++; }
+  return {
+    totalCompanies: totalCompanies,
+    companiesWithNumbers: withNumbers,
+    companiesWithNoNumber: Math.max(0, totalCompanies - withNumbers),
+    companiesWithMultipleNumbers: multi,
+    totalNumbers: nums.length,
+    validNumbers: valid,
+    reviewNumbers: review,
+    invalidNumbers: invalid
+  };
+}
+
+/* ----------------------- batch attach (per request) -------------------- */
+
+function phoneInfoMap_() {
+  if (PHONE_MAP_CACHE) return PHONE_MAP_CACHE;
+  var map = {};
+  readAll_(sheet_(CONTACT_SHEET)).rows.forEach(function (r) {
+    var id = cellStr_(r['COMPANY ID']);
+    if (!id) return;
+    var status = cellStr_(r['VALIDATION STATUS']).toUpperCase();
+    var entry = map[id] || (map[id] = { display: '', dial: '', status: 'NONE', count: 0 });
+    if (status === 'VALID') entry.count++;
+    var isPrimary = String(r['PRIMARY NUMBER']).toUpperCase() === 'TRUE';
+    if (isPrimary || (entry.status === 'NONE' && status === 'VALID')) {
+      entry.display = cellStr_(r['DISPLAY NUMBER']);
+      entry.dial = cellStr_(r['DIAL NUMBER']);
+      entry.status = status;
+    }
+  });
+  PHONE_MAP_CACHE = map;
+  return map;
+}
+
+function attachPhoneInfo_(rows) {
+  if (!rows || !rows.length) return rows;
+  var map = phoneInfoMap_();
+  rows.forEach(function (r) {
+    var p = map[r.companyId];
+    r.primaryPhoneDisplay = p ? p.display : '';
+    r.primaryPhoneDial = (p && p.status === 'VALID') ? p.dial : '';
+    r.phoneCount = p ? p.count : 0;
+    r.hasCleanPhone = !!(p && p.status === 'VALID');
+    r.phoneValidationStatus = p ? p.status : 'NONE';
+  });
+  return rows;
+}
+
+// Spec-named wrappers — all row shapes share the companyId key.
+function attachPrimaryPhoneInfoToCompanyRows_(rows) { return attachPhoneInfo_(rows); }
+function attachPrimaryPhoneInfoToActionRows_(rows) { return attachPhoneInfo_(rows); }
+function attachPrimaryPhoneInfoToCallRows_(rows) { return attachPhoneInfo_(rows); }
+
+/* ------------------------------- routes -------------------------------- */
+
+// Reads COMPANY MASTER regardless of DEMO/LIVE (shared source data).
+function apiSyncContactNumbers_(p) {
+  var stats = syncCompanyContactNumbers_();
+  stats.ok = true;
+  stats.sheet = CONTACT_SHEET;
+  return stats;
+}
+
+function apiGetCompanyContactNumbers_(p) {
+  var companyId = String(p.companyId || '').trim();
+  var statusFilter = String(p.status || '').trim().toUpperCase();
+  var nums;
+  if (companyId) {
+    nums = getCompanyContactNumbers_(companyId);
+  } else {
+    nums = readAll_(sheet_(CONTACT_SHEET)).rows.map(contactNumberJson_);
+  }
+  if (statusFilter) {
+    var wanted = {};
+    statusFilter.split(',').forEach(function (s) { wanted[s.replace(/\s/g, '')] = true; });
+    nums = nums.filter(function (n) { return wanted[n.validationStatus]; });
+  }
+  return { ok: true, count: nums.length, sheet: CONTACT_SHEET, numbers: nums };
+}
+
+function apiGetPrimaryPhone_(p) {
+  var companyId = req_(p.companyId, 'companyId');
+  var primary = getPrimaryPhoneForCompany_(companyId);
+  return { ok: true, companyId: companyId, found: !!primary, primary: primary };
+}
+
+function apiGetPhoneCleanupReport_(p) {
+  var report = getPhoneCleanupReport_();
+  report.ok = true;
+  return report;
 }
