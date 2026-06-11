@@ -88,7 +88,21 @@ var SHEET_HEADERS = {
     'EVENT ID', 'EVENT NAME', 'CATEGORY', 'START DATE', 'END DATE', 'VENUE', 'ORGANIZER',
     'SOURCE', 'SOURCE URL', 'TARGET INDUSTRY', 'POSSIBLE REQUIREMENTS', 'LEAD STATUS',
     'PROSPECTING START DATE', 'PROSPECTING STATUS', 'NOTES',
-    'CREATED BY', 'CREATED AT', 'UPDATED BY', 'UPDATED AT', 'DELETED'
+    'CREATED BY', 'CREATED AT', 'UPDATED BY', 'UPDATED AT', 'DELETED',
+    // Public Event Finder columns (appended; ensureEventColumns_ upgrades
+    // existing sheets in place without touching existing data)
+    'EVENT TYPE', 'CITY', 'PUBLIC LISTING TEXT', 'PROSPECTING ANGLE',
+    'SUGGESTED TARGET COMPANIES', 'REVIEW STATUS', 'CONFIDENCE LEVEL',
+    'DATE FOUND', 'LAST CHECKED'
+  ],
+  // Public Event Finder config (shared across DEMO/LIVE — pure configuration).
+  'EVENT SOURCES': [
+    'SOURCE ID', 'SOURCE NAME', 'SOURCE TYPE', 'SOURCE URL', 'DEFAULT VENUE',
+    'DEFAULT CITY', 'DEFAULT INDUSTRY CATEGORY', 'ACTIVE', 'LAST CHECKED', 'NOTES'
+  ],
+  'EVENT INDUSTRY MAP': [
+    'KEYWORD', 'EVENT TYPE', 'INDUSTRY CATEGORY', 'TARGET INDUSTRIES',
+    'POSSIBLE REQUIREMENTS', 'PROSPECTING ANGLE'
   ],
   // Clean phone-number support table (one number per row). COMPANY MASTER
   // stays the main company database; this sheet only supplies callable numbers.
@@ -175,6 +189,16 @@ function routes_() {
     'logBreadcrumb': apiLogBreadcrumb_,
     'getCompanyEditHistory': apiCompanyEditHistory_,
     'resetDemoActivity': apiResetDemoActivity_,
+    // public event finder
+    'getEventSources': apiGetEventSources_,
+    'upsertEventSource': apiUpsertEventSource_,
+    'getEventIndustryMap': apiGetEventIndustryMap_,
+    'upsertEventIndustryMap': apiUpsertEventIndustryMap_,
+    'importPublicEvents': apiImportPublicEvents_,
+    'getPublicEventCandidates': apiGetPublicEventCandidates_,
+    'approvePublicEvent': apiApprovePublicEvent_,
+    'rejectPublicEvent': apiRejectPublicEvent_,
+    'markEventDuplicate': apiMarkEventDuplicate_,
     // phone cleanup layer
     'syncCompanyContactNumbers': apiSyncContactNumbers_,
     'getCompanyContactNumbers': apiGetCompanyContactNumbers_,
@@ -351,12 +375,19 @@ function breadcrumb_(mode, user, type, companyId, companyName, details) {
 /* ------------------------------- SETUP --------------------------------- */
 
 function setupSheets() {
+  // Keep the spreadsheet's timezone aligned with the script (Asia/Manila) —
+  // otherwise every formatted date shifts by a day.
+  try { ss_().setSpreadsheetTimeZone('Asia/Manila'); } catch (e) { /* non-fatal */ }
   companyMasterSheet_(); // resolve (or create) the company database tab first
   for (var base in SHEET_HEADERS) {
     if (base !== 'COMPANY MASTER') sheet_(base);
   }
   for (var b in MODE_SPECIFIC) sheet_('DEMO ' + b);
+  ensureEventColumns_(sheet_('EVENT MASTER'));
+  ensureEventColumns_(sheet_('DEMO EVENT MASTER'));
   seedUsers_();
+  seedEventSources_();
+  seedEventIndustryMap_();
   return 'Setup complete';
 }
 
@@ -1263,7 +1294,7 @@ function eventJson_(r) {
   if (start) {
     days = Math.ceil((start.getTime() - new Date().getTime()) / 86400000);
   }
-  return {
+  var ev = {
     eventId: cellStr_(r['EVENT ID']),
     eventName: cellStr_(r['EVENT NAME']),
     category: cellStr_(r['CATEGORY']),
@@ -1284,8 +1315,20 @@ function eventJson_(r) {
     createdAt: cellStr_(r['CREATED AT']),
     updatedBy: cellStr_(r['UPDATED BY']),
     updatedAt: cellStr_(r['UPDATED AT']),
-    deleted: String(r['DELETED']).toUpperCase() === 'TRUE'
+    deleted: String(r['DELETED']).toUpperCase() === 'TRUE',
+    eventType: cellStr_(r['EVENT TYPE']),
+    city: cellStr_(r['CITY']),
+    publicListingText: cellStr_(r['PUBLIC LISTING TEXT']),
+    prospectingAngle: cellStr_(r['PROSPECTING ANGLE']),
+    suggestedTargetCompanies: cellStr_(r['SUGGESTED TARGET COMPANIES']),
+    reviewStatus: cellStr_(r['REVIEW STATUS']).toUpperCase(),
+    confidenceLevel: cellStr_(r['CONFIDENCE LEVEL']).toUpperCase(),
+    dateFound: cellStr_(r['DATE FOUND']),
+    lastChecked: cellStr_(r['LAST CHECKED'])
   };
+  ev.opportunityScore = eventOpportunityScore_(ev);
+  ev.priority = ev.opportunityScore >= 70 ? 'HIGH' : (ev.opportunityScore >= 40 ? 'MEDIUM' : 'LOW');
+  return ev;
 }
 
 function apiGetEvents_(p) {
@@ -1295,6 +1338,13 @@ function apiGetEvents_(p) {
   var venue = String(p.venue || '').trim().toLowerCase();
   var range = String(p.range || 'all').trim().toLowerCase();
   if (range === 'allfuture' || range === 'all published future events' || range === '') range = 'all';
+  if (range === '6months' || range === '6mo') range = '180';
+  var fLeadStatus = String(p.leadStatus || '').trim().toUpperCase();
+  var fReviewStatus = String(p.reviewStatus || '').trim().toUpperCase();
+  var fEventType = String(p.eventType || '').trim().toLowerCase();
+  var fSource = String(p.source || '').trim().toLowerCase();
+  var fIndustry = String(p.industryCategory || '').trim().toLowerCase();
+  if (fIndustry) category = fIndustry; // alias: industryCategory == category
 
   var rangeDays = { '30': 30, '90': 90, '180': 180, '365': 365, '540': 540, '730': 730 };
   var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -1304,7 +1354,9 @@ function apiGetEvents_(p) {
     limit.setDate(limit.getDate() + rangeDays[range]);
   }
 
-  var rows = readAll_(sheet_(modeSheetName_('EVENT MASTER', mode))).rows.map(eventJson_)
+  var evSheet = sheet_(modeSheetName_('EVENT MASTER', mode));
+  ensureEventColumns_(evSheet);
+  var rows = readAll_(evSheet).rows.map(eventJson_)
     .filter(function (ev) { return !ev.deleted && ev.eventId; });
 
   var catSet = {}, venueSet = {};
@@ -1321,6 +1373,16 @@ function apiGetEvents_(p) {
     if (limit && (!start || start.getTime() > limit.getTime())) return false;
     if (category && ev.category.toLowerCase() !== category) return false;
     if (venue && ev.venue.toLowerCase() !== venue) return false;
+    if (fEventType && ev.eventType.toLowerCase().indexOf(fEventType) === -1) return false;
+    if (fSource && (ev.source + ' ' + ev.sourceUrl).toLowerCase().indexOf(fSource) === -1) return false;
+    if (fLeadStatus && ev.leadStatus.toUpperCase() !== fLeadStatus) return false;
+    if (fReviewStatus && ev.reviewStatus !== fReviewStatus) return false;
+    // Unless explicitly asked for, hide rejected/duplicate finder leads.
+    if (!fLeadStatus && !fReviewStatus) {
+      var ls = ev.leadStatus.toUpperCase();
+      if (ls === 'NOT RELEVANT' || ls === 'DUPLICATE') return false;
+      if (ev.reviewStatus === 'REJECTED' || ev.reviewStatus === 'DUPLICATE') return false;
+    }
     if (search) {
       var hay = (ev.eventName + ' ' + ev.category + ' ' + ev.venue + ' ' + ev.organizer + ' ' + ev.targetIndustry + ' ' + ev.notes).toLowerCase();
       if (hay.indexOf(search) === -1) return false;
@@ -1340,18 +1402,23 @@ function apiUpsertEvent_(p) {
   var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
   var now = nowStr_();
   var eventId = String(p.eventId || '').trim();
+  ensureEventColumns_(sh);
   var fields = {
     'EVENT NAME': p.eventName, 'CATEGORY': p.category, 'START DATE': p.startDate, 'END DATE': p.endDate,
     'VENUE': p.venue, 'ORGANIZER': p.organizer, 'SOURCE': p.source, 'SOURCE URL': p.sourceUrl,
     'TARGET INDUSTRY': p.targetIndustry, 'POSSIBLE REQUIREMENTS': p.possibleRequirements,
     'LEAD STATUS': p.leadStatus, 'PROSPECTING START DATE': p.prospectingStartDate,
-    'PROSPECTING STATUS': p.prospectingStatus, 'NOTES': p.notes
+    'PROSPECTING STATUS': p.prospectingStatus, 'NOTES': p.notes,
+    'EVENT TYPE': p.eventType, 'CITY': p.city, 'PUBLIC LISTING TEXT': p.publicListingText,
+    'PROSPECTING ANGLE': p.prospectingAngle, 'SUGGESTED TARGET COMPANIES': p.suggestedTargetCompanies,
+    'REVIEW STATUS': p.reviewStatus, 'CONFIDENCE LEVEL': p.confidenceLevel
   };
 
   if (!eventId) {
     if (!String(p.eventName || '').trim()) throw new Error('Event name is required.');
     eventId = 'EV-' + Date.now();
-    var obj = { 'EVENT ID': eventId, 'CREATED BY': user, 'CREATED AT': now, 'UPDATED BY': user, 'UPDATED AT': now, 'DELETED': 'FALSE' };
+    var obj = { 'EVENT ID': eventId, 'CREATED BY': user, 'CREATED AT': now, 'UPDATED BY': user, 'UPDATED AT': now, 'DELETED': 'FALSE',
+                'DATE FOUND': now, 'LAST CHECKED': now };
     for (var h in fields) obj[h] = fields[h] || '';
     appendObj_(sh, obj);
     breadcrumb_(mode, user, 'EVENT ADDED', '', p.eventName, 'Event lead added (' + eventId + ')');
@@ -1770,4 +1837,552 @@ function apiGetPhoneCleanupReport_(p) {
   var report = getPhoneCleanupReport_();
   report.ok = true;
   return report;
+}
+
+/* ====================================================================== */
+/* PUBLIC EVENT FINDER — next-6-months opportunity discovery              */
+/* Sources are configurable (EVENT SOURCES sheet). Import works two ways: */
+/*  - pastedText: manager pastes a public listing; backend parses it.     */
+/*  - URL fetch: best-effort UrlFetchApp scan of source pages. Sites that */
+/*    block fetching or render via JavaScript return a clear per-source   */
+/*    error ("needs manual paste") — no fake scraping, no crash.          */
+/* All imports land as NEEDS REVIEW; managers approve before prospecting. */
+/* ====================================================================== */
+
+var FINDER_WINDOW_DAYS = 183; // ~6 months
+var BUSINESS_EVENT_WORDS = ['expo', 'trade', 'fair', 'convention', 'conference', 'summit', 'exhibit', 'exhibition', 'showcase', 'congress', 'forum', 'franchise', 'b2b', 'show', 'bazaar', 'marketplace'];
+var EVENT_MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+function ensureEventColumns_(sh) {
+  var wanted = SHEET_HEADERS['EVENT MASTER'];
+  var lastCol = sh.getLastColumn() || 1;
+  var have = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(normHeader_);
+  var missing = wanted.filter(function (h) { return have.indexOf(h) === -1; });
+  if (missing.length) {
+    sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
+  }
+}
+
+function seedEventSources_() {
+  var sh = sheet_('EVENT SOURCES');
+  if (sh.getLastRow() > 1) return;
+  var now = '';
+  var rows = [
+    ['SRC-001', 'SMX Convention Center', 'VENUE CALENDAR', 'https://smxconventioncenter.com/events/', 'SMX Convention Center Manila', 'Pasay City', '', 'TRUE', now, 'Verify URL; site may need manual paste'],
+    ['SRC-002', 'World Trade Center Metro Manila', 'VENUE CALENDAR', 'https://www.wtcmanila.com.ph/events/', 'World Trade Center Metro Manila', 'Pasay City', '', 'TRUE', now, 'Verify URL; site may need manual paste'],
+    ['SRC-003', 'Philippine International Convention Center', 'VENUE CALENDAR', 'https://www.picc.gov.ph/events/', 'PICC', 'Pasay City', '', 'TRUE', now, 'Verify URL; site may need manual paste'],
+    ['SRC-004', 'Megatrade Hall (SM Megamall)', 'VENUE CALENDAR', 'https://www.megatradehall.com/', 'Megatrade Hall, SM Megamall', 'Mandaluyong City', '', 'TRUE', now, 'Verify URL; site may need manual paste'],
+    ['SRC-005', '10times Manila expo directory', 'PUBLIC DIRECTORY', 'https://10times.com/manila-ph', '', 'Metro Manila', '', 'TRUE', now, 'Public expo directory'],
+    ['SRC-006', 'Manual paste / search results', 'MANUAL', '', '', '', '', 'TRUE', now, 'Paste listings into the Import box']
+  ];
+  sh.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+function seedEventIndustryMap_() {
+  var sh = sheet_('EVENT INDUSTRY MAP');
+  if (sh.getLastRow() > 1) return;
+  var rows = [
+    ['food, beverage, restaurant, horeca, hotel, catering, culinary, coffee, bakery', 'Trade Fair', 'Food & Beverage / Hospitality',
+     'Food manufacturers; Beverage brands; Restaurants; Hotels; Catering suppliers; Packaging suppliers; Kitchen equipment suppliers',
+     'Booth design and fabrication; Sampling activation; Product demo; Promoters; Registration manpower; Event booth staff',
+     'Exhibitors may need booths, sampling teams, ingress/egress manpower, and brand activations.'],
+    ['construct, building, architecture, real estate, property, housing, interior, worldbex', 'Expo', 'Construction / Real Estate',
+     'Developers; Building material suppliers; Furniture manufacturers; Hardware brands; Architecture firms',
+     'Expo booth; Product display; Lead generation booth staff; Sales promoters; Trade show activation',
+     'Developers, suppliers, and manufacturers often need professional booth execution and lead capture.'],
+    ['medical, healthcare, pharma, dental, hospital, nursing, clinical', 'Convention', 'Healthcare / Pharmaceutical',
+     'Pharma brands; Medical device suppliers; Hospitals; Dental suppliers; Lab equipment vendors',
+     'Scientific conference booth; Registration support; Product information booth; Brand activation; Manpower',
+     'Medical suppliers and pharma brands need compliant event presence and conference support.'],
+    ['beauty, cosmetics, wellness, dermatology, spa, skincare, salon', 'Expo', 'Beauty / Wellness',
+     'Beauty brands; Cosmetics distributors; Spa chains; Wellness products; Derma clinics',
+     'Product sampling; Beauty booth; Promoters; Demonstration area; Lead capture',
+     'Beauty brands need high-engagement booth concepts and sampling teams.'],
+    ['technology, electronics, software, ai, it, digital, fintech, gaming, esports', 'Conference', 'Technology / Electronics',
+     'Tech brands; Software companies; Telcos; Electronics distributors; Fintech startups',
+     'Demo booth; Interactive display; Product launch activation; Registration system; Event manpower',
+     'Tech exhibitors need demo spaces, trained presenters, and registration/event support.'],
+    ['automotive, car, motorcycle, transport, logistics, ev, vehicle', 'Show', 'Automotive / Logistics',
+     'Auto brands; Parts suppliers; Dealerships; Logistics companies; EV brands',
+     'Product display; Vehicle showcase setup; Promo manpower; Test drive support; Lead generation',
+     'Auto brands and suppliers need experience areas, display fabrication, and trained staff.'],
+    ['franchise, business, sme, retail, entrepreneur, startup, negosyo', 'Expo', 'Retail / Franchise / Business',
+     'Franchise brands; Retail chains; SME suppliers; Business services; Payment providers',
+     'Sales booth; Lead capture; Sales promoters; Booth fabrication; Accreditation support',
+     'Franchise exhibitors need booths and manpower to capture investor leads.'],
+    ['education, school, university, training, learning, scholarship', 'Fair', 'Education',
+     'Schools; Universities; Review centers; Ed-tech brands; Training providers',
+     'Information booth; Registration support; Lead generation; Campus activation',
+     'Schools and education brands need event booths and enrollment lead capture.'],
+    ['travel, tourism, airline, destination, cruise, resort', 'Fair', 'Travel / Tourism / Hospitality',
+     'Airlines; Travel agencies; Hotels and resorts; Tourism boards; Cruise lines',
+     'Booth; Destination activation; Promoters; Registration; Product display',
+     'Tourism and hospitality exhibitors need immersive booth concepts and visitor engagement.'],
+    ['agriculture, livestock, farming, food manufacturing, agri, poultry, aqua', 'Expo', 'Agriculture / Food Manufacturing',
+     'Agri suppliers; Feed manufacturers; Farm equipment brands; Food processors; Packaging suppliers',
+     'Product display booth; Sampling; Trade fair manpower; Demonstration booth',
+     'Agriculture and food manufacturing brands need booth execution and product engagement.']
+  ];
+  sh.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+/* --------------------------- date extraction ---------------------------- */
+
+// Parse a loose date or date range out of a text line.
+// Handles: "March 5-7, 2026" | "Mar 30 - Apr 2, 2026" | "5-7 March 2026"
+//          "March 5, 2026" | "2026-03-05" | "03/05/2026"
+// Returns {start: Date, end: Date, matched: '...'} or null.
+function parseLooseDateRange_(text) {
+  var t = String(text || '');
+  var m;
+  // ISO yyyy-mm-dd (optionally a range "yyyy-mm-dd - yyyy-mm-dd")
+  m = t.match(/(\d{4})-(\d{2})-(\d{2})(?:\s*(?:-|–|to)\s*(\d{4})-(\d{2})-(\d{2}))?/);
+  if (m) {
+    var s1 = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    var e1 = m[4] ? new Date(Number(m[4]), Number(m[5]) - 1, Number(m[6])) : s1;
+    if (!isNaN(s1.getTime())) return { start: s1, end: e1, matched: m[0] };
+  }
+  var MON = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
+  // "March 5-7, 2026" / "March 5 - April 2, 2026" / "March 5, 2026"
+  m = t.match(new RegExp(MON + '\\s+(\\d{1,2})(?:\\s*(?:-|–|—|to|&)\\s*(?:' + MON + '\\s+)?(\\d{1,2}))?,?\\s+(\\d{4})', 'i'));
+  if (m) {
+    var mo1 = EVENT_MONTHS[m[1].slice(0, 3).toLowerCase()];
+    var yr = Number(m[5]);
+    var st = new Date(yr, mo1, Number(m[2]));
+    var mo2 = m[3] ? EVENT_MONTHS[m[3].slice(0, 3).toLowerCase()] : mo1;
+    var en = m[4] ? new Date(yr, mo2, Number(m[4])) : st;
+    if (!isNaN(st.getTime())) return { start: st, end: en, matched: m[0] };
+  }
+  // "5-7 March 2026" / "5 March 2026"
+  m = t.match(new RegExp('(\\d{1,2})(?:\\s*(?:-|–|to)\\s*(\\d{1,2}))?\\s+' + MON + ',?\\s+(\\d{4})', 'i'));
+  if (m) {
+    var mo3 = EVENT_MONTHS[m[3].slice(0, 3).toLowerCase()];
+    var yr2 = Number(m[4]);
+    var st2 = new Date(yr2, mo3, Number(m[1]));
+    var en2 = m[2] ? new Date(yr2, mo3, Number(m[2])) : st2;
+    if (!isNaN(st2.getTime())) return { start: st2, end: en2, matched: m[0] };
+  }
+  // mm/dd/yyyy
+  m = t.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) {
+    var st3 = new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]));
+    if (!isNaN(st3.getTime())) return { start: st3, end: st3, matched: m[0] };
+  }
+  return null;
+}
+
+/* ------------------------ classification & scoring ---------------------- */
+
+function industryMapRows_() {
+  return readAll_(sheet_('EVENT INDUSTRY MAP')).rows.map(function (r) {
+    return {
+      keywords: cellStr_(r['KEYWORD']).toLowerCase().split(/[,;]+/).map(function (k) { return k.trim(); }).filter(String),
+      eventType: cellStr_(r['EVENT TYPE']),
+      category: cellStr_(r['INDUSTRY CATEGORY']),
+      targetIndustries: cellStr_(r['TARGET INDUSTRIES']),
+      requirements: cellStr_(r['POSSIBLE REQUIREMENTS']),
+      angle: cellStr_(r['PROSPECTING ANGLE'])
+    };
+  }).filter(function (m) { return m.keywords.length && m.category; });
+}
+
+// Classify by event name/type/organizer/venue/listing text keywords.
+function classifyEvent_(haystack, mapRows) {
+  var hay = ' ' + String(haystack || '').toLowerCase() + ' ';
+  for (var i = 0; i < mapRows.length; i++) {
+    var row = mapRows[i];
+    for (var k = 0; k < row.keywords.length; k++) {
+      if (hay.indexOf(row.keywords[k]) !== -1) return row;
+    }
+  }
+  return null;
+}
+
+function looksBusinessEvent_(text) {
+  var hay = String(text || '').toLowerCase();
+  for (var i = 0; i < BUSINESS_EVENT_WORDS.length; i++) {
+    if (hay.indexOf(BUSINESS_EVENT_WORDS[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function eventOpportunityScore_(ev) {
+  var score = 0;
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var start = parseDate_(ev.startDate);
+  if (start && start.getTime() >= today.getTime()) score += 20;                       // clear future date
+  if (ev.venue) score += 15;                                                          // known venue
+  if (looksBusinessEvent_(ev.eventName + ' ' + ev.eventType)) score += 15;            // trade/business nature
+  if (ev.category && ev.category.toLowerCase() !== 'needs review') score += 15;       // industry matched
+  if (ev.sourceUrl) score += 15;                                                      // credible public source
+  if (start) {                                                                        // within prospecting window
+    var days = Math.ceil((start.getTime() - today.getTime()) / 86400000);
+    if (days >= 0 && days <= FINDER_WINDOW_DAYS) score += 10;
+  }
+  if (ev.possibleRequirements) score += 10;                                           // exhibitor/sponsor opportunity
+  return Math.min(100, score);
+}
+
+function prospectingStartFor_(startDate) {
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var days = Math.ceil((startDate.getTime() - today.getTime()) / 86400000);
+  if (days > 60) {
+    var d = new Date(startDate.getTime() - 45 * 86400000);
+    return { date: dayStr_(d), status: 'SCHEDULED' };
+  }
+  return { date: dayStr_(today), status: days <= 14 ? 'URGENT' : 'START NOW' };
+}
+
+/* ------------------------- candidate extraction ------------------------- */
+
+// Parse free text (pasted listing or stripped HTML) into event candidates.
+function parseEventCandidatesFromText_(text, defaults) {
+  var lines = String(text || '').split(/\r?\n/).map(function (l) { return l.replace(/\s+/g, ' ').trim(); });
+  var candidates = [];
+  var prevLine = '';
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (!line) { prevLine = ''; continue; }
+    var dr = parseLooseDateRange_(line);
+    if (!dr) { prevLine = line; continue; }
+    // Name = same line minus the date, or the previous line for date-only lines.
+    var name = line.replace(dr.matched, ' ').replace(/[|@•–—,:;\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (name.length < 5 && prevLine && !parseLooseDateRange_(prevLine)) name = prevLine;
+    name = name.replace(/\s+/g, ' ').trim();
+    if (name.length < 5) { prevLine = line; continue; }
+    // Venue hint on the following line.
+    var venue = defaults.venue || '';
+    var next = lines[i + 1] || '';
+    if (!venue && /\b(center|centre|hall|smx|picc|wtc|megatrade|hotel|arena|grounds|pavilion)\b/i.test(next) && !parseLooseDateRange_(next)) {
+      venue = next;
+    }
+    candidates.push({
+      eventName: name.slice(0, 150),
+      startDate: dayStr_(dr.start),
+      endDate: dayStr_(dr.end),
+      venue: venue,
+      city: defaults.city || '',
+      organizer: '',
+      source: defaults.sourceName || 'Manual paste',
+      sourceUrl: defaults.sourceUrl || '',
+      listingText: line.slice(0, 400)
+    });
+    prevLine = line;
+  }
+  return candidates;
+}
+
+// Best-effort fetch of a source page. Returns {ok, text} or {ok:false, error}.
+function fetchSourcePage_(url) {
+  try {
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SlingshotzCRM/1.0)' } });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 400) return { ok: false, error: 'HTTP ' + code };
+    var html = resp.getContentText();
+    // strip scripts/styles/tags into scannable text lines
+    var text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;|&amp;|&#\d+;|&[a-z]+;/gi, ' ');
+    return { ok: true, text: text };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+}
+
+/* ------------------------------- import --------------------------------- */
+
+function apiImportPublicEvents_(p) {
+  var mode = normMode_(p.mode);
+  var user = String(p.user || 'SYSTEM').toUpperCase();
+  var dryRun = String(p.dryRun || '').toLowerCase() === 'true';
+  var sourceId = String(p.sourceId || '').trim();
+  var fromDate = parseDate_(p.fromDate);
+  var toDate = parseDate_(p.toDate);
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var windowEnd = new Date(today.getTime() + FINDER_WINDOW_DAYS * 86400000);
+  var from = (fromDate && fromDate.getTime() > today.getTime()) ? fromDate : today;
+  var to = (toDate && toDate.getTime() < windowEnd.getTime()) ? toDate : windowEnd;
+
+  var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
+  ensureEventColumns_(sh);
+  var existing = readAll_(sh);
+  var dupKeys = {};
+  existing.rows.forEach(function (r) {
+    var key = normEventKey_(cellStr_(r['EVENT NAME']), cellStr_(r['VENUE']), cellStr_(r['START DATE']));
+    if (key) dupKeys[key] = r;
+  });
+
+  var mapRows = industryMapRows_();
+  var sources = readAll_(sheet_('EVENT SOURCES')).rows.filter(function (r) {
+    if (String(r['ACTIVE']).toUpperCase() === 'FALSE') return false;
+    if (sourceId && cellStr_(r['SOURCE ID']) !== sourceId) return false;
+    return true;
+  });
+
+  var result = {
+    ok: true, dryRun: dryRun, mode: mode, scannedSources: 0, eventsFound: 0, eventsImported: 0,
+    duplicatesSkipped: 0, rejectedPastEvents: 0, rejectedBeyondSixMonths: 0, needsReview: 0,
+    errors: [], imported: []
+  };
+
+  var allCandidates = [];
+
+  // Option C: pasted listing text (always works).
+  var pasted = String(p.pastedText || '').trim();
+  if (pasted) {
+    var src = sources.length === 1 ? sources[0] : null;
+    allCandidates = allCandidates.concat(parseEventCandidatesFromText_(pasted, {
+      sourceName: src ? cellStr_(src['SOURCE NAME']) : 'Manual paste',
+      sourceUrl: src ? cellStr_(src['SOURCE URL']) : '',
+      venue: src ? cellStr_(src['DEFAULT VENUE']) : '',
+      city: src ? cellStr_(src['DEFAULT CITY']) : ''
+    }));
+  } else {
+    // Option B: best-effort fetch of configured source URLs.
+    var srcSheet = sheet_('EVENT SOURCES');
+    sources.forEach(function (srcRow) {
+      var url = cellStr_(srcRow['SOURCE URL']);
+      if (!url) return;
+      result.scannedSources++;
+      var page = fetchSourcePage_(url);
+      var name = cellStr_(srcRow['SOURCE NAME']);
+      if (!page.ok) {
+        result.errors.push(name + ': fetch failed (' + page.error + ') — needs manual paste/import');
+      } else {
+        var cands = parseEventCandidatesFromText_(page.text, {
+          sourceName: name, sourceUrl: url,
+          venue: cellStr_(srcRow['DEFAULT VENUE']), city: cellStr_(srcRow['DEFAULT CITY'])
+        });
+        if (!cands.length) {
+          result.errors.push(name + ': page fetched but no parseable event listings (likely rendered by JavaScript) — needs manual paste/import');
+        }
+        allCandidates = allCandidates.concat(cands);
+      }
+      if (!dryRun) {
+        srcRow['LAST CHECKED'] = nowStr_();
+        writeObj_(srcSheet, srcRow._row, srcRow);
+      }
+    });
+  }
+
+  result.eventsFound = allCandidates.length;
+  var now = nowStr_();
+  var seenThisRun = {};
+
+  var JUNK_RE = /\b(birthday|wedding|debut|anniversary party|christening|funeral|private party|reunion)\b/i;
+
+  allCandidates.forEach(function (c) {
+    var start = parseDate_(c.startDate);
+    if (!start) return;
+    if (JUNK_RE.test(c.eventName + ' ' + c.listingText)) return; // no prospecting value
+    if (start.getTime() < from.getTime()) { result.rejectedPastEvents++; return; }
+    if (start.getTime() > to.getTime()) { result.rejectedBeyondSixMonths++; return; }
+
+    var key = normEventKey_(c.eventName, c.venue, c.startDate);
+    if (seenThisRun[key]) { result.duplicatesSkipped++; return; }
+    seenThisRun[key] = true;
+    if (dupKeys[key]) {
+      result.duplicatesSkipped++;
+      if (!dryRun) {
+        var ex = dupKeys[key];
+        ex['LAST CHECKED'] = now;
+        if (!cellStr_(ex['SOURCE URL']) && c.sourceUrl) ex['SOURCE URL'] = c.sourceUrl;
+        writeObj_(sh, ex._row, ex);
+      }
+      return;
+    }
+
+    var hay = c.eventName + ' ' + c.organizer + ' ' + c.venue + ' ' + c.listingText;
+    var map = classifyEvent_(hay, mapRows);
+    var business = looksBusinessEvent_(hay);
+    var confidence = (map && c.venue) ? 'HIGH' : ((map || (business && c.venue)) ? 'MEDIUM' : 'LOW');
+    var prospect = prospectingStartFor_(start);
+    var days = Math.ceil((start.getTime() - today.getTime()) / 86400000);
+
+    var rec = {
+      'EVENT ID': 'EV-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      'EVENT NAME': c.eventName,
+      'CATEGORY': map ? map.category : 'Needs Review',
+      'EVENT TYPE': map ? map.eventType : (business ? 'Trade / Business Event' : ''),
+      'START DATE': c.startDate, 'END DATE': c.endDate,
+      'VENUE': c.venue, 'CITY': c.city, 'ORGANIZER': c.organizer,
+      'SOURCE': c.source, 'SOURCE URL': c.sourceUrl,
+      'PUBLIC LISTING TEXT': c.listingText,
+      'TARGET INDUSTRY': map ? map.targetIndustries : '',
+      'POSSIBLE REQUIREMENTS': map ? map.requirements : '',
+      'PROSPECTING ANGLE': map ? map.angle : '',
+      'SUGGESTED TARGET COMPANIES': map ? map.targetIndustries : '',
+      'LEAD STATUS': 'NEW', 'REVIEW STATUS': 'NEEDS REVIEW',
+      'CONFIDENCE LEVEL': map ? confidence : 'LOW',
+      'DATE FOUND': now, 'LAST CHECKED': now,
+      'PROSPECTING START DATE': prospect.date, 'PROSPECTING STATUS': prospect.status,
+      'DAYS UNTIL EVENT': days,
+      'NOTES': '', 'CREATED BY': user, 'CREATED AT': now, 'UPDATED BY': user, 'UPDATED AT': now,
+      'DELETED': 'FALSE'
+    };
+    result.needsReview++;
+    result.eventsImported++;
+    result.imported.push({ eventName: c.eventName, startDate: c.startDate, venue: c.venue, category: rec['CATEGORY'], confidence: rec['CONFIDENCE LEVEL'] });
+    if (!dryRun) appendObj_(sh, rec);
+  });
+
+  if (!dryRun && result.eventsImported) {
+    breadcrumb_(mode, user, 'EVENT ADDED', '', '', 'Public Event Finder imported ' + result.eventsImported + ' event lead(s)');
+  }
+  if (dryRun) result.eventsImported = 0;
+  return result;
+}
+
+function normEventKey_(name, venue, startDate) {
+  var n = String(name || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '');
+  if (!n) return '';
+  var v = String(venue || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12);
+  var d = cellStr_(startDate);
+  return n + '|' + v + '|' + d;
+}
+
+/* ------------------------- sources & map routes ------------------------- */
+
+function apiGetEventSources_(p) {
+  var includeInactive = String(p.all || '').toLowerCase() === 'true';
+  var sources = readAll_(sheet_('EVENT SOURCES')).rows.map(function (r) {
+    return {
+      sourceId: cellStr_(r['SOURCE ID']), sourceName: cellStr_(r['SOURCE NAME']),
+      sourceType: cellStr_(r['SOURCE TYPE']), sourceUrl: cellStr_(r['SOURCE URL']),
+      defaultVenue: cellStr_(r['DEFAULT VENUE']), defaultCity: cellStr_(r['DEFAULT CITY']),
+      defaultIndustryCategory: cellStr_(r['DEFAULT INDUSTRY CATEGORY']),
+      active: String(r['ACTIVE']).toUpperCase() !== 'FALSE',
+      lastChecked: cellStr_(r['LAST CHECKED']), notes: cellStr_(r['NOTES'])
+    };
+  });
+  if (!includeInactive) sources = sources.filter(function (s) { return s.active; });
+  return { ok: true, count: sources.length, sheet: 'EVENT SOURCES', sources: sources };
+}
+
+function apiUpsertEventSource_(p) {
+  var by = requireManager_(p.user || p.by);
+  var sh = sheet_('EVENT SOURCES');
+  var data = readAll_(sh);
+  var sourceId = String(p.sourceId || '').trim();
+  var fields = {
+    'SOURCE NAME': p.sourceName, 'SOURCE TYPE': p.sourceType, 'SOURCE URL': p.sourceUrl,
+    'DEFAULT VENUE': p.defaultVenue, 'DEFAULT CITY': p.defaultCity,
+    'DEFAULT INDUSTRY CATEGORY': p.defaultIndustryCategory,
+    'ACTIVE': p.active, 'NOTES': p.notes
+  };
+  if (!sourceId) {
+    if (!String(p.sourceName || '').trim()) throw new Error('Source name is required.');
+    var maxN = 0;
+    data.rows.forEach(function (r) {
+      var m = String(r['SOURCE ID'] || '').match(/^SRC-(\d+)$/);
+      if (m) maxN = Math.max(maxN, Number(m[1]));
+    });
+    sourceId = 'SRC-' + ('000' + (maxN + 1)).slice(-3);
+    var obj = { 'SOURCE ID': sourceId, 'ACTIVE': 'TRUE' };
+    for (var h in fields) if (fields[h] !== undefined && fields[h] !== '') obj[h] = fields[h];
+    appendObj_(sh, obj);
+    breadcrumb_('DEMO', by.code, 'EVENT ADDED', '', p.sourceName, 'Event source added (' + sourceId + ')');
+    return { ok: true, message: 'Source added.', sourceId: sourceId };
+  }
+  for (var i = 0; i < data.rows.length; i++) {
+    var r = data.rows[i];
+    if (cellStr_(r['SOURCE ID']) === sourceId) {
+      for (var f in fields) { if (fields[f] !== undefined && fields[f] !== '') r[f] = fields[f]; }
+      writeObj_(sh, r._row, r);
+      return { ok: true, message: 'Source updated.', sourceId: sourceId };
+    }
+  }
+  return { ok: false, error: 'Source not found: ' + sourceId };
+}
+
+function apiGetEventIndustryMap_(p) {
+  var rows = readAll_(sheet_('EVENT INDUSTRY MAP')).rows.map(function (r) {
+    return {
+      keyword: cellStr_(r['KEYWORD']), eventType: cellStr_(r['EVENT TYPE']),
+      industryCategory: cellStr_(r['INDUSTRY CATEGORY']), targetIndustries: cellStr_(r['TARGET INDUSTRIES']),
+      possibleRequirements: cellStr_(r['POSSIBLE REQUIREMENTS']), prospectingAngle: cellStr_(r['PROSPECTING ANGLE'])
+    };
+  });
+  return { ok: true, count: rows.length, sheet: 'EVENT INDUSTRY MAP', map: rows };
+}
+
+function apiUpsertEventIndustryMap_(p) {
+  var by = requireManager_(p.user || p.by);
+  var sh = sheet_('EVENT INDUSTRY MAP');
+  var data = readAll_(sh);
+  var keyword = req_(p.keyword, 'keyword');
+  var fields = {
+    'KEYWORD': keyword, 'EVENT TYPE': p.eventType, 'INDUSTRY CATEGORY': p.industryCategory,
+    'TARGET INDUSTRIES': p.targetIndustries, 'POSSIBLE REQUIREMENTS': p.possibleRequirements,
+    'PROSPECTING ANGLE': p.prospectingAngle
+  };
+  for (var i = 0; i < data.rows.length; i++) {
+    var r = data.rows[i];
+    if (cellStr_(r['KEYWORD']).toLowerCase() === keyword.toLowerCase()) {
+      for (var f in fields) { if (fields[f] !== undefined) r[f] = fields[f]; }
+      writeObj_(sh, r._row, r);
+      return { ok: true, message: 'Mapping updated.' };
+    }
+  }
+  appendObj_(sh, fields);
+  return { ok: true, message: 'Mapping added.' };
+}
+
+/* --------------------------- review workflow ---------------------------- */
+
+function apiGetPublicEventCandidates_(p) {
+  var mode = normMode_(p.mode);
+  var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
+  ensureEventColumns_(sh);
+  var today = dayStr_(new Date());
+  var candidates = readAll_(sh).rows.map(eventJson_).filter(function (ev) {
+    if (ev.deleted || !ev.eventId) return false;
+    if (['NEEDS REVIEW', 'NEEDS DATE CHECK', 'NEEDS SOURCE CHECK'].indexOf(ev.reviewStatus) === -1) return false;
+    var end = ev.endDate || ev.startDate;
+    if (end && end < today) return false;
+    return true;
+  }).sort(function (a, b) { return b.opportunityScore - a.opportunityScore; });
+  return { ok: true, count: candidates.length, mode: mode, candidates: candidates };
+}
+
+function setEventReview_(mode, eventId, user, reviewStatus, leadStatus) {
+  var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
+  ensureEventColumns_(sh);
+  var data = readAll_(sh);
+  for (var i = 0; i < data.rows.length; i++) {
+    var r = data.rows[i];
+    if (cellStr_(r['EVENT ID']) === eventId) {
+      r['REVIEW STATUS'] = reviewStatus;
+      if (leadStatus) r['LEAD STATUS'] = leadStatus;
+      r['UPDATED BY'] = user;
+      r['UPDATED AT'] = nowStr_();
+      r['LAST CHECKED'] = nowStr_();
+      writeObj_(sh, r._row, r);
+      breadcrumb_(mode, user, 'EVENT UPDATED', '', cellStr_(r['EVENT NAME']), 'Review: ' + reviewStatus + (leadStatus ? ' / ' + leadStatus : ''));
+      return cellStr_(r['EVENT NAME']);
+    }
+  }
+  return null;
+}
+
+function apiApprovePublicEvent_(p) {
+  var by = requireManager_(p.user || p.by);
+  var name = setEventReview_(normMode_(p.mode), req_(p.eventId, 'eventId'), by.code, 'VERIFIED', 'APPROVED FOR PROSPECTING');
+  return name ? { ok: true, message: '"' + name + '" approved for prospecting.' } : { ok: false, error: 'Event not found.' };
+}
+
+function apiRejectPublicEvent_(p) {
+  var by = requireManager_(p.user || p.by);
+  var name = setEventReview_(normMode_(p.mode), req_(p.eventId, 'eventId'), by.code, 'REJECTED', 'NOT RELEVANT');
+  return name ? { ok: true, message: '"' + name + '" marked not relevant.' } : { ok: false, error: 'Event not found.' };
+}
+
+function apiMarkEventDuplicate_(p) {
+  var by = requireManager_(p.user || p.by);
+  var name = setEventReview_(normMode_(p.mode), req_(p.eventId, 'eventId'), by.code, 'DUPLICATE', 'DUPLICATE');
+  return name ? { ok: true, message: '"' + name + '" marked duplicate.' } : { ok: false, error: 'Event not found.' };
 }

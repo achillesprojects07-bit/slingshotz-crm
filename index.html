@@ -806,14 +806,15 @@ const EVENT_RANGES = [
   ['365','Next 12 Months'],['540','Next 18 Months'],['730','Next 24 Months'],
   ['all','All published future events']
 ];
-const LEAD_STATUSES=['NEW','QUALIFIED','PROSPECTING','ON HOLD','CONVERTED','DROPPED'];
+const LEAD_STATUSES=['NEW','REVIEWED','APPROVED FOR PROSPECTING','IN PROSPECTING','CONTACTED ORGANIZER','CONTACTED EXHIBITOR','QUALIFIED','PROSPECTING','ON HOLD','CONVERTED','DROPPED','NOT RELEVANT','DUPLICATE','CLOSED'];
 const PROSPECT_STATUSES=['NOT STARTED','IN PROGRESS','DONE'];
 
 async function renderEvents(c){
   const f=state.eventFilters;
   const data = await api('getEvents', {search:f.search, category:f.category, venue:f.venue, range:f.range});
   const canAdd = state.user.role==='MANAGER' || state.user.canAddEvents;
-  c.innerHTML =
+  const isMgr = state.user.role==='MANAGER';
+  c.innerHTML = (isMgr ? finderPanelHtml() : '') +
     '<div class="panel">'+
     '<div class="section-title"><h2>Events Leads ('+data.count+') <small style="color:var(--muted);font-weight:400">· '+esc(data.sheet)+'</small></h2>'+
       (canAdd?'<button class="btn btn-primary btn-sm" data-action="event-new">+ Add Event Lead</button>':'')+'</div>'+
@@ -831,13 +832,204 @@ async function renderEvents(c){
   $('#ev-venue').addEventListener('change', e=>{ f.venue=e.target.value; renderTab(state.tab); });
   $('#ev-range').addEventListener('change', e=>{ f.range=e.target.value; renderTab(state.tab); });
   state.eventsCache = data.events;
+  if (isMgr) initFinderPanel(data.events);
 }
+
+/* ==================== PUBLIC EVENT FINDER (manager) ==================== */
+
+function finderPanelHtml(){
+  return '<div class="panel" id="pef-panel">'+
+    '<div class="section-title"><h2>Public Event Finder <small style="color:var(--muted);font-weight:400">\u00b7 next 6 months \u00b7 manager review required</small></h2>'+
+    '<button class="btn btn-sm" data-action="pef-add-source">+ Add Source</button></div>'+
+    '<div class="cards" id="pef-stats"></div>'+
+    '<div class="filter-bar">'+
+      '<div class="field"><label>Source</label><select id="pef-source"><option value="">All active sources</option></select></div>'+
+      '<div class="field"><label>From</label><input type="date" id="pef-from"></div>'+
+      '<div class="field"><label>To</label><input type="date" id="pef-to"></div>'+
+      '<div class="field" style="max-width:140px"><label>Dry Run</label><select id="pef-dry"><option value="true">Yes (preview)</option><option value="false">No (import)</option></select></div>'+
+    '</div>'+
+    '<div class="field" style="margin-bottom:10px"><label>Paste public event listings (optional \u2014 most reliable method)</label>'+
+    '<textarea id="pef-paste" rows="4" placeholder="Paste event names and dates copied from a venue calendar, expo directory, search results\u2026\nExample:\nManila Food & Beverage Expo\nSeptember 9-11, 2026\nSMX Convention Center"></textarea></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      '<button class="btn btn-primary" data-action="pef-import">Import Public Events</button>'+
+      '<button class="btn" data-action="pef-review">Review New Events</button>'+
+      '<button class="btn" data-action="pef-refresh-sources">Refresh Sources</button>'+
+    '</div>'+
+    '<div id="pef-result" style="margin-top:10px"></div>'+
+    '<div id="pef-candidates" style="margin-top:10px"></div>'+
+  '</div>';
+}
+
+async function initFinderPanel(events){
+  // stats from current data + last import
+  const li = state.lastImport || {};
+  const today = todayStr();
+  const next6 = (events||[]).filter(ev=>ev.daysUntilEvent!=='' && ev.daysUntilEvent>=0 && ev.daysUntilEvent<=183).length;
+  const approved = (events||[]).filter(ev=>ev.leadStatus.toUpperCase()==='APPROVED FOR PROSPECTING').length;
+  let needsReview = '\u2026';
+  const stats = [
+    ['Events Found', li.eventsFound!==undefined?li.eventsFound:'\u2014'],
+    ['Imported', li.eventsImported!==undefined?li.eventsImported:'\u2014'],
+    ['Needs Review', needsReview],
+    ['Approved for Prospecting', approved],
+    ['Duplicates Skipped', li.duplicatesSkipped!==undefined?li.duplicatesSkipped:'\u2014'],
+    ['Next 6 Months', next6]
+  ];
+  const box=$('#pef-stats');
+  if(box) box.innerHTML = stats.map(s=>'<div class="stat-card" style="cursor:default"><div class="num">'+s[1]+'</div><div class="lbl">'+s[0]+'</div></div>').join('');
+  try{
+    if(!state.eventSources){ state.eventSources = (await api('getEventSources',{})).sources; }
+    const sel=$('#pef-source');
+    if(sel) sel.innerHTML='<option value="">All active sources</option>'+state.eventSources.map(s=>'<option value="'+esc(s.sourceId)+'">'+esc(s.sourceName)+'</option>').join('');
+    const cand = await api('getPublicEventCandidates',{});
+    state.pefCandidates = cand.candidates;
+    const nr=document.querySelectorAll('#pef-stats .stat-card')[2];
+    if(nr) nr.querySelector('.num').textContent = cand.count;
+  }catch(e){ /* panel stays usable; import button will surface errors */ }
+}
+
+ACTIONS['pef-refresh-sources']=async (el)=>{
+  el.disabled=true;
+  try{ state.eventSources=(await api('getEventSources',{})).sources; toast(state.eventSources.length+' active source(s) loaded','success'); initFinderPanel(state.eventsCache); }
+  catch(e){ toast(e.message,'error'); }
+  el.disabled=false;
+};
+
+ACTIONS['pef-import']=async (el)=>{
+  const dry = $('#pef-dry').value==='true';
+  const pasted = $('#pef-paste').value.trim();
+  if(!pasted && !confirm('No pasted text \u2014 the importer will try to fetch the configured source pages directly. Many venue sites render with JavaScript and may need manual paste instead. Continue?')) return;
+  el.disabled=true; el.textContent= dry?'Previewing\u2026':'Importing\u2026';
+  try{
+    const r = await api('importPublicEvents',{user:state.user.code, sourceId:$('#pef-source').value, fromDate:$('#pef-from').value, toDate:$('#pef-to').value, dryRun:String(dry), pastedText:pasted});
+    state.lastImport = r;
+    const box=$('#pef-result');
+    box.innerHTML =
+      '<div class="stats-grid">'+
+      [['Found',r.eventsFound],[dry?'Would import':'Imported',dry?r.imported.length:r.eventsImported],['Duplicates skipped',r.duplicatesSkipped],['Past rejected',r.rejectedPastEvents],['Beyond 6 months',r.rejectedBeyondSixMonths]]
+        .map(s=>'<div class="stat"><b>'+s[1]+'</b><span>'+s[0]+'</span></div>').join('')+'</div>'+
+      (r.imported.length?'<div style="margin-top:8px;font-size:12.5px">'+r.imported.slice(0,15).map(i=>'\u2022 <b>'+esc(i.eventName)+'</b> \u2014 '+esc(i.startDate)+' \u00b7 '+esc(i.category)+' \u00b7 '+esc(i.confidence)).join('<br>')+(r.imported.length>15?'<br>\u2026and '+(r.imported.length-15)+' more':'')+'</div>':'')+
+      (r.errors.length?'<div style="margin-top:8px;color:var(--warn);font-size:12.5px">'+r.errors.map(e=>'\u26a0 '+esc(e)).join('<br>')+'</div>':'');
+    toast(dry?'Dry run complete \u2014 nothing was saved':'Imported '+r.eventsImported+' event lead(s)', dry?'':'success');
+    if(!dry){ $('#pef-paste').value=''; renderTab(state.tab); }
+  }catch(e){ toast(e.message,'error'); }
+  el.disabled=false; el.textContent='Import Public Events';
+};
+
+ACTIONS['pef-review']=async (el)=>{
+  el.disabled=true;
+  try{
+    const data = await api('getPublicEventCandidates',{});
+    state.pefCandidates = data.candidates;
+    $('#pef-candidates').innerHTML = '<h3 style="margin-bottom:8px">Candidates Needing Review ('+data.count+')</h3>'+
+      (data.candidates.length ? data.candidates.map(candidateCard).join('') : emptyHtml('\u2705','No event candidates waiting for review.'));
+  }catch(e){ toast(e.message,'error'); }
+  el.disabled=false;
+};
+
+function scorePill(ev){
+  const cls = ev.priority==='HIGH'?'pill-good':(ev.priority==='MEDIUM'?'pill-retry':'pill-neutral');
+  return '<span class="pill '+cls+'">'+ev.opportunityScore+' \u00b7 '+ev.priority+'</span>';
+}
+
+function candidateCard(ev){
+  return '<div class="attn-item attn-p'+(ev.priority==='HIGH'?'1':(ev.priority==='MEDIUM'?'4':'6'))+'" style="flex-direction:column;align-items:stretch">'+
+    '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">'+
+      '<div><b>'+esc(ev.eventName)+'</b><br><small style="color:var(--muted)">'+esc(ev.startDate||'?')+(ev.endDate&&ev.endDate!==ev.startDate?' \u2192 '+esc(ev.endDate):'')+' \u00b7 '+esc(ev.venue||'venue?')+(ev.city?' \u00b7 '+esc(ev.city):'')+(ev.organizer?' \u00b7 '+esc(ev.organizer):'')+'</small></div>'+
+      '<div>'+scorePill(ev)+' <span class="pill pill-neutral">'+esc(ev.confidenceLevel||'LOW')+'</span> <span class="pill pill-retry">'+esc(ev.reviewStatus)+'</span></div>'+
+    '</div>'+
+    '<div style="font-size:12.5px;margin-top:4px"><b>'+esc(ev.category||'Needs Review')+'</b>'+(ev.eventType?' \u00b7 '+esc(ev.eventType):'')+
+      (ev.targetIndustry?'<br>Targets: '+esc(ev.targetIndustry):'')+
+      (ev.possibleRequirements?'<br>Possible needs: '+esc(ev.possibleRequirements):'')+
+      (ev.prospectingAngle?'<br><i style="color:var(--muted)">'+esc(ev.prospectingAngle)+'</i>':'')+
+      (ev.sourceUrl?'<br><a href="'+esc(ev.sourceUrl)+'" target="_blank" rel="noopener">Source: '+esc(ev.source||ev.sourceUrl)+' \u2197</a>':(ev.source?'<br>Source: '+esc(ev.source):''))+
+      (ev.publicListingText?'<div class="orig-phone">Listing: \u201c'+esc(ev.publicListingText)+'\u201d</div>':'')+
+    '</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+
+      '<button class="btn btn-sm btn-primary" data-action="pef-approve" data-eid="'+esc(ev.eventId)+'">Approve for Prospecting</button>'+
+      '<button class="btn btn-sm" data-action="pef-reject" data-eid="'+esc(ev.eventId)+'">Mark Not Relevant</button>'+
+      '<button class="btn btn-sm" data-action="pef-dup" data-eid="'+esc(ev.eventId)+'">Mark Duplicate</button>'+
+      '<button class="btn btn-sm btn-ghost" data-action="pef-edit" data-eid="'+esc(ev.eventId)+'">Edit</button>'+
+    '</div>'+
+  '</div>';
+}
+
+async function pefReviewAction(el, eventId, action, label){
+  el.disabled=true; el.textContent=label;
+  try{
+    const r = await api(action,{user:state.user.code, eventId});
+    toast(r.message,'success');
+    renderTab(state.tab);
+  }catch(e){ toast(e.message,'error'); el.disabled=false; }
+}
+ACTIONS['pef-approve']=(el,d)=>pefReviewAction(el,d.eid,'approvePublicEvent','Approving\u2026');
+ACTIONS['pef-reject']=(el,d)=>pefReviewAction(el,d.eid,'rejectPublicEvent','Saving\u2026');
+ACTIONS['pef-dup']=(el,d)=>pefReviewAction(el,d.eid,'markEventDuplicate','Saving\u2026');
+ACTIONS['pef-edit']=(el,d)=>{
+  const ev=(state.pefCandidates||[]).concat(state.eventsCache||[]).find(x=>x.eventId===d.eid);
+  if(ev) openEventModal(ev);
+};
+
+ACTIONS['pef-add-source']=()=>{
+  openModal('<div class="modal-head"><h2>Add Event Source</h2><button class="modal-x" data-action="close-modal">\u00d7</button></div>'+
+    '<div class="modal-body"><div class="form-grid">'+
+      '<div class="full"><label>Source Name *</label><input id="src-name" placeholder="e.g. SMX Convention Center"></div>'+
+      '<div><label>Type</label><select id="src-type"><option>VENUE CALENDAR</option><option>PUBLIC DIRECTORY</option><option>ORGANIZER WEBSITE</option><option>ASSOCIATION WEBSITE</option><option>MANUAL</option></select></div>'+
+      '<div><label>Source URL</label><input id="src-url" placeholder="https://\u2026"></div>'+
+      '<div><label>Default Venue</label><input id="src-venue"></div>'+
+      '<div><label>Default City</label><input id="src-city"></div>'+
+      '<div class="full"><label>Notes</label><input id="src-notes"></div>'+
+    '</div></div>'+
+    '<div class="modal-foot"><button class="btn" data-action="close-modal">Cancel</button>'+
+    '<button class="btn btn-primary" data-action="pef-save-source">Save Source</button></div>');
+};
+
+ACTIONS['pef-save-source']=async (el)=>{
+  const name=$('#src-name').value.trim();
+  if(!name){ toast('Source name is required','error'); return; }
+  el.disabled=true; el.textContent='Saving\u2026';
+  try{
+    await api('upsertEventSource',{user:state.user.code, sourceName:name, sourceType:$('#src-type').value, sourceUrl:$('#src-url').value.trim(), defaultVenue:$('#src-venue').value.trim(), defaultCity:$('#src-city').value.trim(), notes:$('#src-notes').value.trim()});
+    toast('Source saved','success');
+    state.eventSources=null;
+    closeModal();
+    renderTab(state.tab);
+  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Source'; }
+};
+
+// "Find Matching Companies": agents jump to Add Targets pre-filtered;
+// managers (no Add Targets tab) get a modal of matching COMPANY MASTER rows.
+ACTIONS['ev-find-companies']=async (el,d)=>{
+  const ev=(state.eventsCache||[]).concat(state.pefCandidates||[]).find(x=>x.eventId===d.eid);
+  if(!ev) return;
+  const keywords=(ev.category+' '+(ev.targetIndustry||'')).toLowerCase().split(/[^a-z0-9&]+/).filter(k=>k.length>3);
+  if(state.user.role!=='MANAGER'){
+    state.queueFilters={cat:'',search:keywords[0]||'',page:1};
+    renderTab('add');
+    toast('Add Targets filtered for "'+(keywords[0]||'')+'" \u2014 adjust search/category as needed');
+    return;
+  }
+  el.disabled=true;
+  try{
+    if(!state.queue){ state.queue = await api('getCallQueue',{user:state.user.code}); }
+    const matches=state.queue.companies.filter(co=>{
+      const hay=(co.category+' '+co.companyName).toLowerCase();
+      return keywords.some(k=>hay.indexOf(k)!==-1);
+    }).slice(0,100);
+    openModal('<div class="modal-head"><h2>Matching Companies \u2014 '+esc(ev.eventName)+'</h2><button class="modal-x" data-action="close-modal">\u00d7</button></div>'+
+      '<div class="modal-body">'+
+      '<p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Matched on: '+esc(keywords.join(', '))+' \u00b7 showing '+matches.length+' compan'+(matches.length===1?'y':'ies')+'. Agents add targets themselves \u2014 nothing is auto-assigned.</p>'+
+      (matches.length ? matches.map(co=>'<div class="hist-item"><div class="top"><span><b>'+esc(co.companyName)+'</b> <small style="color:var(--muted)">'+esc(co.companyId)+' \u00b7 '+esc(co.category)+'</small></span>'+(co.owner?'<span class="pill pill-neutral">'+esc(co.owner)+'</span>':'')+'</div>'+phoneLine(co)+'</div>').join('') : emptyHtml('\ud83d\udd0d','No companies match these keywords.'))+
+      '</div><div class="modal-foot"><button class="btn" data-action="close-modal">Close</button></div>');
+  }catch(e){ toast(e.message,'error'); }
+  el.disabled=false;
+};
 
 function eventTable(events){
   if(!events.length) return emptyHtml('🎪','No event leads in this range yet.');
   const isMgr = state.user.role==='MANAGER';
   const canAdd = isMgr || state.user.canAddEvents;
-  return '<div class="table-wrap"><table><thead><tr><th>Event</th><th>Dates</th><th>Days Until</th><th>Venue / Organizer</th><th>Target Industry</th><th>Lead Status</th><th>Prospecting</th><th></th></tr></thead><tbody>'+
+  return '<div class="table-wrap"><table><thead><tr><th>Event</th><th>Dates</th><th>Days Until</th><th>Venue / Organizer</th><th>Target Industry</th><th>Lead Status</th><th>Score</th><th>Prospecting</th><th></th></tr></thead><tbody>'+
     events.map(ev=>'<tr>'+
       '<td><b>'+esc(ev.eventName)+'</b><br><small style="color:var(--muted)">'+esc(ev.category||'')+' · '+esc(ev.eventId)+'</small>'+
         (ev.sourceUrl?'<br><a href="'+esc(ev.sourceUrl)+'" target="_blank" rel="noopener" style="font-size:12px">Source ↗</a>':'')+'</td>'+
@@ -845,9 +1037,11 @@ function eventTable(events){
       '<td>'+(ev.daysUntilEvent!==''?'<span class="pill '+(ev.daysUntilEvent<=30?'pill-retry':'pill-neutral')+'">'+ev.daysUntilEvent+' days</span>':'—')+'</td>'+
       '<td>'+esc(ev.venue||'—')+(ev.organizer?'<br><small style="color:var(--muted)">'+esc(ev.organizer)+'</small>':'')+'</td>'+
       '<td>'+esc(ev.targetIndustry||'—')+(ev.possibleRequirements?'<br><small style="color:var(--muted)">'+esc(ev.possibleRequirements)+'</small>':'')+'</td>'+
-      '<td><span class="pill pill-neutral">'+esc(ev.leadStatus||'NEW')+'</span></td>'+
+      '<td><span class="pill pill-neutral">'+esc(ev.leadStatus||'NEW')+'</span>'+(ev.reviewStatus&&ev.reviewStatus!=='VERIFIED'?'<br><span class="pill pill-retry" style="margin-top:3px">'+esc(ev.reviewStatus)+'</span>':'')+'</td>'+
+      '<td>'+scorePill(ev)+'</td>'+
       '<td>'+esc(ev.prospectingStatus||'—')+(ev.prospectingStartDate?'<br><small>'+esc(ev.prospectingStartDate)+'</small>':'')+'</td>'+
       '<td class="nowrap">'+
+        '<button class="btn btn-sm btn-ghost" data-action="ev-find-companies" data-eid="'+esc(ev.eventId)+'">Find Companies</button> '+
         (canAdd?'<button class="btn btn-sm" data-action="event-edit" data-eid="'+esc(ev.eventId)+'">Edit</button> ':'')+
         (isMgr?'<button class="btn btn-sm btn-danger" data-action="event-delete" data-eid="'+esc(ev.eventId)+'" data-ename="'+esc(ev.eventName)+'">Delete</button>':'')+
       '</td>'+
@@ -877,6 +1071,11 @@ function openEventModal(ev){
       '<div class="full"><label>Event Name *</label><input id="evm-name" value="'+esc(ev.eventName||'')+'"></div>'+
       '<div><label>Category</label><input id="evm-cat" value="'+esc(ev.category||'')+'" placeholder="Trade show, expo, festival…"></div>'+
       '<div><label>Organizer</label><input id="evm-org" value="'+esc(ev.organizer||'')+'"></div>'+
+      '<div><label>Event Type</label><input id="evm-type" value="'+esc(ev.eventType||'')+'" placeholder="Expo, Conference, Summit…"></div>'+
+      '<div><label>City</label><input id="evm-city" value="'+esc(ev.city||'')+'"></div>'+
+      '<div><label>Review Status</label><select id="evm-review"><option value="">—</option>'+['NEEDS REVIEW','VERIFIED','NEEDS DATE CHECK','NEEDS SOURCE CHECK','DUPLICATE','REJECTED'].map(s=>'<option'+((ev.reviewStatus||'')===s?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
+      '<div><label>Confidence</label><select id="evm-conf"><option value="">—</option>'+['HIGH','MEDIUM','LOW'].map(s=>'<option'+((ev.confidenceLevel||'')===s?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
+      '<div class="full"><label>Prospecting Angle</label><input id="evm-angle" value="'+esc(ev.prospectingAngle||'')+'" placeholder="Why exhibitors here need Slingshotz…"></div>'+
       '<div><label>Start Date</label><input id="evm-start" type="date" value="'+esc(ev.startDate||'')+'"></div>'+
       '<div><label>End Date</label><input id="evm-end" type="date" value="'+esc(ev.endDate||'')+'"></div>'+
       '<div class="full"><label>Venue</label><input id="evm-venue" value="'+esc(ev.venue||'')+'"></div>'+
@@ -906,7 +1105,10 @@ ACTIONS['event-save'] = async (el,d)=>{
       source: $('#evm-source').value.trim(), sourceUrl: $('#evm-url').value.trim(),
       targetIndustry: $('#evm-industry').value.trim(), possibleRequirements: $('#evm-req').value.trim(),
       leadStatus: $('#evm-status').value, prospectingStatus: $('#evm-pstatus').value,
-      prospectingStartDate: $('#evm-pstart').value, notes: $('#evm-notes').value.trim()
+      prospectingStartDate: $('#evm-pstart').value, notes: $('#evm-notes').value.trim(),
+      eventType: $('#evm-type').value.trim(), city: $('#evm-city').value.trim(),
+      reviewStatus: $('#evm-review').value, confidenceLevel: $('#evm-conf').value,
+      prospectingAngle: $('#evm-angle').value.trim()
     });
     // Per spec: close modal, clear filters, range = all future, reload, toast.
     closeModal();
