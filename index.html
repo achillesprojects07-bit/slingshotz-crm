@@ -147,6 +147,8 @@
   .btn-xs{padding:3px 8px;font-size:11.5px;border-radius:6px}
   .no-phone{color:var(--muted);font-size:11.5px;font-style:italic;margin-top:3px}
   .orig-phone{font-size:11px;color:var(--muted);margin-top:2px;word-break:break-word}
+  .btn-viber{background:#7360f2;border-color:#7360f2;color:#fff}
+  .btn-viber:hover{background:#5f4dd0}
   .qr-box{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
   .qr-box svg{border:1px solid var(--line);border-radius:10px;background:#fff}
   .stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:12px}
@@ -344,7 +346,8 @@ function phoneBtns(r){
   var isMobile = String(r.primaryPhoneDial||'').charAt(0) === '+';
   return ' <button class="btn btn-xs btn-primary" data-action="call-phone"'+ctx+'>\uD83D\uDCDE Call</button>'+
          ' <button class="btn btn-xs" data-action="qr-call"'+ctx+'>\u25A6 QR Call</button>'+
-         (isMobile ? ' <button class="btn btn-xs" data-action="qr-msg"'+ctx+'>\uD83D\uDCAC QR Msg</button>' : '');
+         (isMobile ? ' <button class="btn btn-xs" data-action="qr-msg"'+ctx+'>\uD83D\uDCAC QR Msg</button>'+
+                     ' <button class="btn btn-xs btn-viber" data-action="viber-chat"'+ctx+'>Viber</button>' : '');
 }
 
 function viewNumbersBtn(r, label){
@@ -412,6 +415,15 @@ function showCallQrModal(companyId, companyName, dialNumber, displayNumber, qrMo
 ACTIONS['qr-mode'] = (el,d)=> showCallQrModal(d.cid, d.cname, d.dial, d.display, d.mode);
 ACTIONS['qr-msg'] = (el,d)=> showCallQrModal(d.cid, d.cname, d.dial, d.display, 'sms');
 
+// Opens a Viber chat with the number (Viber app on phone, Viber Desktop on
+// computer). Like Call/QR, this never auto-logs — agents use Open / Log after.
+function openViberChat(dialNumber, companyName){
+  if (!dialNumber || dialNumber.charAt(0) !== '+'){ toast('Viber needs a valid mobile number','error'); return; }
+  toast('Opening Viber chat with '+(companyName||'company')+'\u2026 After the conversation, tap Open / Log to record the result.');
+  window.location.href = 'viber://chat?number=' + encodeURIComponent(dialNumber);
+}
+ACTIONS['viber-chat'] = (el,d)=> openViberChat(d.dial, d.cname);
+
 ACTIONS['call-phone'] = (el,d)=> callPhoneNumber(d.dial, d.cname, d.cid);
 ACTIONS['qr-call'] = (el,d)=> showCallQrModal(d.cid, d.cname, d.dial, d.display);
 
@@ -434,7 +446,8 @@ ACTIONS['view-numbers'] = async (el,d)=>{
         (n.validationStatus==='VALID' ?
           '<div style="margin:5px 0"><button class="btn btn-xs btn-primary" data-action="call-phone" data-dial="'+esc(n.dialNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\uD83D\uDCDE Call '+esc(n.displayNumber)+'</button> '+
           '<button class="btn btn-xs" data-action="qr-call" data-dial="'+esc(n.dialNumber)+'" data-display="'+esc(n.displayNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\u25A6 QR Call</button>'+
-          (n.dialNumber.charAt(0)==='+' ? ' <button class="btn btn-xs" data-action="qr-msg" data-dial="'+esc(n.dialNumber)+'" data-display="'+esc(n.displayNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\uD83D\uDCAC QR Msg</button>' : '')+'</div>' : '')+
+          (n.dialNumber.charAt(0)==='+' ? ' <button class="btn btn-xs" data-action="qr-msg" data-dial="'+esc(n.dialNumber)+'" data-display="'+esc(n.displayNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\uD83D\uDCAC QR Msg</button>'+
+            ' <button class="btn btn-xs btn-viber" data-action="viber-chat" data-dial="'+esc(n.dialNumber)+'" data-cname="'+esc(d.cname||'')+'">Viber</button>' : '')+'</div>' : '')+
         (n.validationNote ? '<div style="color:var(--muted);font-size:12px">'+esc(n.validationNote)+'</div>' : '')+
         '<div class="orig-phone">From '+esc(n.sourceField)+': \u201C'+esc(n.originalText)+'\u201D</div>'+
       '</div>';
