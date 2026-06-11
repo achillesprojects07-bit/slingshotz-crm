@@ -340,8 +340,11 @@ ACTIONS['close-modal'] = () => closeModal();
 // Open / Log after the call.
 
 function phoneBtns(r){
-  return ' <button class="btn btn-xs btn-primary" data-action="call-phone" data-dial="'+esc(r.primaryPhoneDial)+'" data-cname="'+esc(r.companyName||'')+'" data-cid="'+esc(r.companyId||'')+'">\uD83D\uDCDE Call</button>'+
-         ' <button class="btn btn-xs" data-action="qr-call" data-dial="'+esc(r.primaryPhoneDial)+'" data-display="'+esc(r.primaryPhoneDisplay)+'" data-cname="'+esc(r.companyName||'')+'" data-cid="'+esc(r.companyId||'')+'">\u25A6 QR Call</button>';
+  var ctx = ' data-dial="'+esc(r.primaryPhoneDial)+'" data-display="'+esc(r.primaryPhoneDisplay)+'" data-cname="'+esc(r.companyName||'')+'" data-cid="'+esc(r.companyId||'')+'"';
+  var isMobile = String(r.primaryPhoneDial||'').charAt(0) === '+';
+  return ' <button class="btn btn-xs btn-primary" data-action="call-phone"'+ctx+'>\uD83D\uDCDE Call</button>'+
+         ' <button class="btn btn-xs" data-action="qr-call"'+ctx+'>\u25A6 QR Call</button>'+
+         (isMobile ? ' <button class="btn btn-xs" data-action="qr-msg"'+ctx+'>\uD83D\uDCAC QR Msg</button>' : '');
 }
 
 function viewNumbersBtn(r, label){
@@ -407,6 +410,7 @@ function showCallQrModal(companyId, companyName, dialNumber, displayNumber, qrMo
 }
 
 ACTIONS['qr-mode'] = (el,d)=> showCallQrModal(d.cid, d.cname, d.dial, d.display, d.mode);
+ACTIONS['qr-msg'] = (el,d)=> showCallQrModal(d.cid, d.cname, d.dial, d.display, 'sms');
 
 ACTIONS['call-phone'] = (el,d)=> callPhoneNumber(d.dial, d.cname, d.cid);
 ACTIONS['qr-call'] = (el,d)=> showCallQrModal(d.cid, d.cname, d.dial, d.display);
@@ -429,7 +433,8 @@ ACTIONS['view-numbers'] = async (el,d)=>{
           (n.primaryNumber ? ' <span class="pill pill-meet">PRIMARY</span>' : '')+'</span></div>'+
         (n.validationStatus==='VALID' ?
           '<div style="margin:5px 0"><button class="btn btn-xs btn-primary" data-action="call-phone" data-dial="'+esc(n.dialNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\uD83D\uDCDE Call '+esc(n.displayNumber)+'</button> '+
-          '<button class="btn btn-xs" data-action="qr-call" data-dial="'+esc(n.dialNumber)+'" data-display="'+esc(n.displayNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\u25A6 QR Call</button></div>' : '')+
+          '<button class="btn btn-xs" data-action="qr-call" data-dial="'+esc(n.dialNumber)+'" data-display="'+esc(n.displayNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\u25A6 QR Call</button>'+
+          (n.dialNumber.charAt(0)==='+' ? ' <button class="btn btn-xs" data-action="qr-msg" data-dial="'+esc(n.dialNumber)+'" data-display="'+esc(n.displayNumber)+'" data-cname="'+esc(d.cname||'')+'" data-cid="'+esc(d.cid)+'">\uD83D\uDCAC QR Msg</button>' : '')+'</div>' : '')+
         (n.validationNote ? '<div style="color:var(--muted);font-size:12px">'+esc(n.validationNote)+'</div>' : '')+
         '<div class="orig-phone">From '+esc(n.sourceField)+': \u201C'+esc(n.originalText)+'\u201D</div>'+
       '</div>';
