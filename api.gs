@@ -31,6 +31,11 @@ var DAILY_TARGET = 30;      // calls per agent per day
 var MAX_ATTEMPTS = 3;       // retry cap for non-contact results
 var EVENT_SOON_DAYS = 45;   // "client event coming soon" window
 
+// PATCHED — collision-proof ID: timestamp + 5 random base-36 chars
+function uniqueId_() {
+  return Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+}
+
 /* ----------------------------- VOCABULARY ----------------------------- */
 
 var CALL_RESULTS = [
@@ -199,6 +204,10 @@ function routes_() {
     'approvePublicEvent': apiApprovePublicEvent_,
     'rejectPublicEvent': apiRejectPublicEvent_,
     'markEventDuplicate': apiMarkEventDuplicate_,
+    // public (no auth): minimal user list for login dropdown only
+    'getLoginUsers': apiGetLoginUsers_,
+    // agent-level: own trail only (managers should use getWorkTrailRange)
+    'getMyActivity': apiGetMyActivity_,
     // phone cleanup layer
     'syncCompanyContactNumbers': apiSyncContactNumbers_,
     'getCompanyContactNumbers': apiGetCompanyContactNumbers_,
@@ -248,9 +257,12 @@ function sheet_(name) {
   return sh;
 }
 
+// PATCHED — strict: only 'DEMO' (default) or 'LIVE' accepted; anything else throws
 function normMode_(m) {
-  m = String(m || 'DEMO').toUpperCase();
-  return m === 'LIVE' ? 'LIVE' : 'DEMO';
+  var s = String(m == null ? '' : m).toUpperCase().trim();
+  if (s === '' || s === 'DEMO') return 'DEMO';
+  if (s === 'LIVE') return 'LIVE';
+  throw new Error('Invalid mode. Must be DEMO or LIVE.');
 }
 
 // The company database may live in a tab that isn't literally named
@@ -386,6 +398,7 @@ function setupSheets() {
   ensureEventColumns_(sheet_('EVENT MASTER'));
   ensureEventColumns_(sheet_('DEMO EVENT MASTER'));
   seedUsers_();
+  migrateHashPins_(); // PATCHED — hash any plaintext PINs on every setup run
   seedEventSources_();
   seedEventIndustryMap_();
   return 'Setup complete';
@@ -396,15 +409,17 @@ function apiSetup_(p) {
   return { ok: true, message: 'Sheets created/verified and initial users seeded (default PIN 1111).' };
 }
 
+// PATCHED — seed PINs are stored pre-hashed so migrateHashPins_ is a no-op on first run
 function seedUsers_() {
   var sh = sheet_('USERS');
   if (sh.getLastRow() > 1) return; // never overwrite existing users
   var now = nowStr_();
+  var h = hashPin_('1111');
   var seed = [
-    ['ARN', 'Aileen Narciso', '1111', 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now],
-    ['MRY', 'Miggy Yanquiling', '1111', 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now],
-    ['BRN', 'Brian Noble', '1111', 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now],
-    ['MGO', 'Magoe Narisma', '1111', 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now]
+    ['ARN', 'Aileen Narciso', h, 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now],
+    ['MRY', 'Miggy Yanquiling', h, 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now],
+    ['BRN', 'Brian Noble', h, 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now],
+    ['MGO', 'Magoe Narisma', h, 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now]
   ];
   sh.getRange(2, 1, seed.length, seed[0].length).setValues(seed);
 }
@@ -420,6 +435,44 @@ function findUser_(code) {
   return null;
 }
 
+// PATCHED — SHA-256 hex digest of a PIN string
+function hashPin_(pin) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(pin || ''));
+  return bytes.map(function(b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
+}
+
+// PATCHED — one-time migration: hash any plaintext PINs in USERS sheet (idempotent)
+function migrateHashPins_() {
+  var sh = sheet_('USERS');
+  var data = readAll_(sh);
+  data.rows.forEach(function(r) {
+    var pin = String(r['PIN'] || '').trim();
+    if (!pin) return;
+    if (/^[0-9a-f]{64}$/.test(pin)) return; // already hashed
+    r['PIN'] = hashPin_(pin);
+    r['UPDATED AT'] = nowStr_();
+    writeObj_(sh, r._row, r);
+  });
+}
+
+// PATCHED — verify user code + PIN; throws on any mismatch
+function verifyUser_(code, pin) {
+  var u = findUser_(req_(code, 'user'));
+  if (!u) throw new Error('Unknown user: ' + code);
+  var uj = userJson_(u);
+  if (!uj.active) throw new Error('User account is deactivated: ' + code);
+  if (String(u['PIN']).trim() !== hashPin_(String(pin || ''))) throw new Error('Incorrect PIN.');
+  return uj;
+}
+
+// PATCHED — convenience wrapper: reads p.user + p.pin
+function verifyAnyUser_(p) {
+  return verifyUser_(
+    String(p.user || '').trim().toUpperCase(),
+    String(p.pin || '').trim()
+  );
+}
+
 function userJson_(u) {
   return {
     code: cellStr_(u['USER CODE']).toUpperCase(),
@@ -431,12 +484,14 @@ function userJson_(u) {
   };
 }
 
-function requireManager_(code) {
+// PATCHED — now verifies PIN in addition to manager role
+function requireManager_(code, pin) {
   var u = findUser_(req_(code, 'by'));
   if (!u) throw new Error('Unknown user: ' + code);
   var uj = userJson_(u);
   if (!uj.active) throw new Error('User is deactivated: ' + code);
   if (uj.role !== 'MANAGER') throw new Error('Manager permission required for this action.');
+  if (String(u['PIN']).trim() !== hashPin_(String(pin || ''))) throw new Error('Incorrect PIN.');
   return uj;
 }
 
@@ -448,24 +503,75 @@ function apiLogin_(p) {
   if (!u) return { ok: false, error: 'Unknown user code.' };
   var uj = userJson_(u);
   if (!uj.active) return { ok: false, error: 'This account is deactivated. Ask a manager to reactivate it.' };
-  if (String(u['PIN']).trim() !== String(pin).trim()) return { ok: false, error: 'Incorrect PIN.' };
+  // PATCHED — compare against hashed PIN
+  if (String(u['PIN']).trim() !== hashPin_(String(pin).trim())) return { ok: false, error: 'Incorrect PIN.' };
   breadcrumb_(mode, uj.code, 'LOGIN', '', '', 'Logged in (' + mode + ' mode)');
   return { ok: true, mode: mode, user: uj };
 }
 
+// Agent-level: returns only the authenticated user's own work trail entries.
+// Managers should use getWorkTrailRange (which supports cross-agent queries).
+function apiGetMyActivity_(p) {
+  var authed = verifyAnyUser_(p);
+  var mode = normMode_(p.mode);
+  var from = String(p.fromDate || '').trim();
+  var to = String(p.toDate || '').trim();
+  var typeKey = String(p.type || 'all').trim().toLowerCase();
+  var typeSet = TRAIL_TYPE_FILTERS.hasOwnProperty(typeKey) ? TRAIL_TYPE_FILTERS[typeKey] : null;
+  var user = authed.code;
+
+  var entries = [];
+  readAll_(sheet_(modeSheetName_('APP ACTIVITY LOG', mode))).rows.forEach(function(r) {
+    var type = cellStr_(r['ACTIVITY TYPE']).toUpperCase();
+    if (type === 'CALL LOGGED') return;
+    var when = whenOf_(r);
+    entries.push({ when: when, timestamp: cellStr_(r['TIMESTAMP']), agent: cellStr_(r['USER']).toUpperCase(),
+      type: type, companyId: cellStr_(r['COMPANY ID']), company: cellStr_(r['COMPANY NAME']),
+      details: cellStr_(r['DETAILS']), source: 'Activity Log' });
+  });
+  callRows_(mode).forEach(function(c) {
+    entries.push({ when: c.when, timestamp: c.timestamp, agent: c.agent, type: 'CALL LOGGED',
+      companyId: c.companyId, company: c.companyName,
+      details: c.result + (c.followUpDate ? ' | follow-up ' + c.followUpDate : '') + (c.notes ? ' | ' + c.notes : ''),
+      source: 'Call Log' });
+  });
+  entries = entries.filter(function(en) {
+    if (en.agent !== user) return false;
+    if (typeSet && !typeSet[en.type]) return false;
+    if ((from || to) && !inRange_(en.when, from, to)) return false;
+    return true;
+  });
+  entries.sort(function(a, b) { return (b.when ? b.when.getTime() : 0) - (a.when ? a.when.getTime() : 0); });
+  entries = entries.map(stripWhen_);
+  return { ok: true, count: entries.length, mode: mode, entries: entries };
+}
+
+// Public — no auth. Returns only {code, name} for active users, used for the login dropdown.
+function apiGetLoginUsers_() {
+  var users = readAll_(sheet_('USERS')).rows
+    .map(userJson_)
+    .filter(function(u) { return u.active; })
+    .map(function(u) { return { code: u.code, name: u.name }; });
+  return { ok: true, users: users };
+}
+
+// PATCHED — manager auth required
 function apiGetUsers_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var data = readAll_(sheet_('USERS'));
   var users = data.rows.map(userJson_);
   return { ok: true, count: users.length, sheet: 'USERS', users: users };
 }
 
+// PATCHED — manager PIN verified; new user PIN passed as p.newPin and stored hashed
 function apiAddUser_(p) {
-  var by = requireManager_(p.by);
+  var by = requireManager_(p.by, p.pin);
   var code = req_(p.code, 'code').toUpperCase();
   if (findUser_(code)) return { ok: false, error: 'User code already exists: ' + code };
+  var rawNewPin = req_(p.newPin || p.pin, 'newPin');
   var now = nowStr_();
   appendObj_(sheet_('USERS'), {
-    'USER CODE': code, 'NAME': req_(p.name, 'name'), 'PIN': req_(p.pin, 'pin'),
+    'USER CODE': code, 'NAME': req_(p.name, 'name'), 'PIN': hashPin_(rawNewPin),
     'ROLE': String(p.role || 'AGENT').toUpperCase() === 'MANAGER' ? 'MANAGER' : 'AGENT',
     'ACTIVE': 'TRUE',
     'CAN ADD EVENTS': String(p.canAddEvents || 'TRUE').toUpperCase() === 'FALSE' ? 'FALSE' : 'TRUE',
@@ -491,8 +597,9 @@ function updateUserRow_(code, mutate) {
   return false;
 }
 
+// PATCHED — manager PIN verified
 function apiUpdateUser_(p) {
-  var by = requireManager_(p.by);
+  var by = requireManager_(p.by, p.pin);
   var code = req_(p.code, 'code').toUpperCase();
   var found = updateUserRow_(code, function (r) {
     if (p.name !== undefined && p.name !== '') r['NAME'] = p.name;
@@ -505,18 +612,20 @@ function apiUpdateUser_(p) {
   return { ok: true, message: 'User ' + code + ' updated.' };
 }
 
+// PATCHED — manager PIN verified (p.pin); new PIN for target user is p.newPin and stored hashed
 function apiResetUserPin_(p) {
-  var by = requireManager_(p.by);
+  var by = requireManager_(p.by, p.pin);
   var code = req_(p.code, 'code').toUpperCase();
-  var pin = req_(p.pin, 'pin');
-  var found = updateUserRow_(code, function (r) { r['PIN'] = pin; });
+  var rawNewPin = req_(p.newPin || p.pin, 'newPin');
+  var found = updateUserRow_(code, function (r) { r['PIN'] = hashPin_(rawNewPin); });
   if (!found) return { ok: false, error: 'User not found: ' + code };
   breadcrumb_(normMode_(p.mode), by.code, 'PIN RESET', '', '', 'Reset PIN for ' + code);
   return { ok: true, message: 'PIN reset for ' + code + '.' };
 }
 
+// PATCHED — manager PIN verified
 function apiSetUserActive_(p) {
-  var by = requireManager_(p.by);
+  var by = requireManager_(p.by, p.pin);
   var code = req_(p.code, 'code').toUpperCase();
   var active = String(p.active).toUpperCase() === 'TRUE';
   var found = updateUserRow_(code, function (r) { r['ACTIVE'] = active ? 'TRUE' : 'FALSE'; });
@@ -574,9 +683,11 @@ function companyJson_(r) {
   };
 }
 
+// PATCHED — user auth required
 function apiGetCallQueue_(p) {
   var mode = normMode_(p.mode);
-  var user = String(p.user || '').trim().toUpperCase();
+  var authed = verifyAnyUser_(p);
+  var user = authed.code;
   var master = readAll_(companyMasterSheet_());
   var statusData = readAll_(sheet_(modeSheetName_('COMPANY STATUS', mode)));
   var statusById = {};
@@ -613,9 +724,13 @@ function apiGetCallQueue_(p) {
   };
 }
 
+// PATCHED — manager PIN verified + write lock + collision-proof company ID
 function apiUpsertCompany_(p) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
   var mode = normMode_(p.mode);
-  var by = requireManager_(p.user || p.by);
+  var by = requireManager_(p.user || p.by, p.pin);
   var sh = companyMasterSheet_();
   var data = readAll_(sh);
   var params = {
@@ -628,7 +743,7 @@ function apiUpsertCompany_(p) {
 
   if (!companyId) {
     if (!String(p.companyName || '').trim()) throw new Error('Company name is required.');
-    companyId = 'C-' + Date.now();
+    companyId = 'C-' + uniqueId_();
     var obj = { 'COMPANY ID': companyId };
     for (var f in params) {
       var h = resolveHeader_(data.headers, COMPANY_FIELD_ALIASES[f]);
@@ -662,6 +777,7 @@ function apiUpsertCompany_(p) {
     }
   }
   return { ok: false, error: 'Company not found: ' + companyId };
+  } finally { lock.releaseLock(); }
 }
 
 /* --------------------------- TARGETS / ACTIONS -------------------------- */
@@ -679,8 +795,10 @@ function targetJson_(r) {
   };
 }
 
+// PATCHED — user auth required
 function apiGetDailyActions_(p) {
   var mode = normMode_(p.mode);
+  verifyAnyUser_(p);
   var agent = String(p.agent || '').trim().toUpperCase();
   var rows = readAll_(sheet_(modeSheetName_('DAILY ACTION LIST', mode))).rows.map(targetJson_);
   if (agent && agent !== 'ALL') rows = rows.filter(function (t) { return t.agent === agent; });
@@ -688,9 +806,11 @@ function apiGetDailyActions_(p) {
   return { ok: true, count: rows.length, sheet: modeSheetName_('DAILY ACTION LIST', mode), targets: rows };
 }
 
+// PATCHED — user auth required
 function apiGetMyActions_(p) {
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var authed = verifyAnyUser_(p);
+  var user = authed.code;
   var rows = readAll_(sheet_(modeSheetName_('DAILY ACTION LIST', mode))).rows
     .map(targetJson_)
     .filter(function (t) { return t.agent === user && t.status === 'PENDING'; });
@@ -698,9 +818,14 @@ function apiGetMyActions_(p) {
   return { ok: true, count: rows.length, sheet: modeSheetName_('DAILY ACTION LIST', mode), targets: rows };
 }
 
+// PATCHED — user auth required + write lock
 function apiAddTarget_(p) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var authed = verifyAnyUser_(p);
+  var user = authed.code;
   var companyId = req_(p.companyId, 'companyId');
   var sh = sheet_(modeSheetName_('DAILY ACTION LIST', mode));
   var data = readAll_(sh);
@@ -739,11 +864,14 @@ function apiAddTarget_(p) {
   }
   breadcrumb_(mode, user, 'TARGET ADDED', companyId, companyName, 'Added to target list');
   return { ok: true, message: companyName + ' added to your target list.', sheet: sh.getName() };
+  } finally { lock.releaseLock(); }
 }
 
+// PATCHED — user auth required
 function apiRemoveTarget_(p) {
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var authed = verifyAnyUser_(p);
+  var user = authed.code;
   var companyId = req_(p.companyId, 'companyId');
   var sh = sheet_(modeSheetName_('DAILY ACTION LIST', mode));
   var data = readAll_(sh);
@@ -790,9 +918,14 @@ function stripWhen_(c) {
   return o;
 }
 
+// PATCHED — user auth required + write lock + collision-proof call ID
 function apiLogCall_(p) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var authed = verifyAnyUser_(p);
+  var user = authed.code;
   var companyId = req_(p.companyId, 'companyId');
   var result = req_(p.result, 'result').toUpperCase();
   if (CALL_RESULTS.indexOf(result) === -1) {
@@ -812,7 +945,7 @@ function apiLogCall_(p) {
   }
 
   // 1) Append to CALL LOG (history is always preserved).
-  var callId = 'CL-' + Date.now();
+  var callId = 'CL-' + uniqueId_();
   appendObj_(sheet_(modeSheetName_('CALL LOG', mode)), {
     'TIMESTAMP': nowStr_(), 'CALL ID': callId, 'COMPANY ID': companyId, 'COMPANY NAME': companyName,
     'AGENT': user, 'CALL RESULT': result, 'FOLLOW UP DATE': followUpDate,
@@ -849,6 +982,7 @@ function apiLogCall_(p) {
     result + (followUpDate ? ' | follow-up ' + followUpDate : '') + (clientEventName ? ' | event: ' + clientEventName : ''));
 
   return { ok: true, message: 'Call logged.', callId: callId, sheet: modeSheetName_('CALL LOG', mode) };
+  } finally { lock.releaseLock(); }
 }
 
 function updateCompanyStatus_(mode, user, companyId, companyName, result, followUpDate, clientEventName, clientEventDate) {
@@ -909,7 +1043,9 @@ function updateCompanyStatus_(mode, user, companyId, companyName, result, follow
   else writeObj_(sh, row._row, row);
 }
 
+// PATCHED — user auth required
 function apiGetCallHistory_(p) {
+  verifyAnyUser_(p);
   var mode = normMode_(p.mode);
   var companyId = req_(p.companyId, 'companyId');
   var history = callRows_(mode)
@@ -983,9 +1119,11 @@ function openMeetings_(calls, agent) {
 
 /* --------------------------- AGENT DASHBOARD ---------------------------- */
 
+// PATCHED — user auth required
 function apiAgentDashboard_(p) {
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var authed = verifyAnyUser_(p);
+  var user = authed.code;
 
   var targets = readAll_(sheet_(modeSheetName_('DAILY ACTION LIST', mode))).rows
     .map(targetJson_)
@@ -1060,7 +1198,9 @@ function agentStatsFromCalls_(calls, lastActivityByAgent) {
   return out.sort(function (x, y) { return y.calls - x.calls; });
 }
 
+// PATCHED — manager PIN verified
 function apiManagerDashboard_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var mode = normMode_(p.mode);
   var from = String(p.fromDate || '').trim();
   var to = String(p.toDate || '').trim();
@@ -1131,7 +1271,9 @@ function apiManagerDashboard_(p) {
   };
 }
 
+// PATCHED — manager PIN verified
 function apiAgentPerformance_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var mode = normMode_(p.mode);
   var from = String(p.fromDate || '').trim();
   var to = String(p.toDate || '').trim();
@@ -1177,7 +1319,9 @@ var TRAIL_TYPE_FILTERS = {
   'app': { 'LOGIN': 1, 'MODE SWITCH': 1, 'DEMO RESET': 1 }
 };
 
+// PATCHED — manager PIN verified
 function apiWorkTrail_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var mode = normMode_(p.mode);
   var from = String(p.fromDate || '').trim();
   var to = String(p.toDate || '').trim();
@@ -1278,7 +1422,9 @@ function computeAttention_(mode, agent) {
   return out;
 }
 
+// PATCHED — manager PIN verified
 function apiManagerAttentionRoute_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var mode = normMode_(p.mode);
   var agent = String(p.agent || '').trim().toUpperCase();
   if (agent === 'ALL') agent = '';
@@ -1331,7 +1477,9 @@ function eventJson_(r) {
   return ev;
 }
 
+// PATCHED — manager PIN verified
 function apiGetEvents_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var mode = normMode_(p.mode);
   var search = String(p.search || '').trim().toLowerCase();
   var category = String(p.category || '').trim().toLowerCase();
@@ -1396,9 +1544,11 @@ function apiGetEvents_(p) {
   };
 }
 
+// PATCHED — manager PIN verified + collision-proof event ID
 function apiUpsertEvent_(p) {
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var by = requireManager_(p.user || p.by, p.pin);
+  var user = by.code;
   var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
   var now = nowStr_();
   var eventId = String(p.eventId || '').trim();
@@ -1416,7 +1566,7 @@ function apiUpsertEvent_(p) {
 
   if (!eventId) {
     if (!String(p.eventName || '').trim()) throw new Error('Event name is required.');
-    eventId = 'EV-' + Date.now();
+    eventId = 'EV-' + uniqueId_();
     var obj = { 'EVENT ID': eventId, 'CREATED BY': user, 'CREATED AT': now, 'UPDATED BY': user, 'UPDATED AT': now, 'DELETED': 'FALSE',
                 'DATE FOUND': now, 'LAST CHECKED': now };
     for (var h in fields) obj[h] = fields[h] || '';
@@ -1440,9 +1590,11 @@ function apiUpsertEvent_(p) {
   return { ok: false, error: 'Event not found: ' + eventId };
 }
 
+// PATCHED — manager PIN verified
 function apiDeleteEvent_(p) {
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var by = requireManager_(p.user || p.by, p.pin);
+  var user = by.code;
   var eventId = req_(p.eventId, 'eventId');
   var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
   var data = readAll_(sh);
@@ -1462,15 +1614,19 @@ function apiDeleteEvent_(p) {
 
 /* ------------------------------- ACTIVITY ------------------------------- */
 
+// PATCHED — user auth required
 function apiLogBreadcrumb_(p) {
+  var authed = verifyAnyUser_(p);
   var mode = normMode_(p.mode);
-  var user = req_(p.user, 'user').toUpperCase();
+  var user = authed.code;
   var type = req_(p.type, 'type').toUpperCase();
   breadcrumb_(mode, user, type, p.companyId || '', p.companyName || '', p.details || '');
   return { ok: true, sheet: modeSheetName_('APP ACTIVITY LOG', mode) };
 }
 
+// PATCHED — manager PIN verified
 function apiCompanyEditHistory_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var mode = normMode_(p.mode);
   var entries = readAll_(sheet_(modeSheetName_('APP ACTIVITY LOG', mode))).rows
     .filter(function (r) { return cellStr_(r['ACTIVITY TYPE']).toUpperCase() === 'COMPANY EDITED'; })
@@ -1485,8 +1641,12 @@ function apiCompanyEditHistory_(p) {
   return { ok: true, count: entries.length, entries: entries };
 }
 
+// PATCHED — confirmToken guard + manager PIN verified
 function apiResetDemoActivity_(p) {
-  var by = requireManager_(p.by || p.user);
+  if (String(p.confirmToken || '') !== 'CONFIRM-RESET') {
+    return { ok: false, error: 'Confirmation token required. Pass confirmToken=CONFIRM-RESET to proceed.' };
+  }
+  var by = requireManager_(p.by || p.user, p.pin);
   var cleared = [];
   ['DEMO CALL LOG', 'DEMO DAILY ACTION LIST', 'DEMO APP ACTIVITY LOG', 'DEMO EVENT MASTER', 'DEMO COMPANY STATUS'].forEach(function (name) {
     var sh = sheet_(name);
@@ -1516,8 +1676,7 @@ var PHONE_SOURCE_FIELDS = [
   'OTHER CONTACTS', 'OTHER CONTACTS & EMAILS', 'EMAIL / CONTACT INFO'
 ];
 
-// Cache: the contact sheet is read at most once per request.
-var PHONE_MAP_CACHE = null;
+// PATCHED — phone map cache uses CacheService (60 s TTL) instead of in-memory var
 
 /* --------------------------- pure helpers ----------------------------- */
 
@@ -1692,7 +1851,7 @@ function syncCompanyContactNumbers_() {
       .setNumberFormat('@')
       .setValues(outRows);
   }
-  PHONE_MAP_CACHE = null;
+  try { CacheService.getScriptCache().remove('phoneMap'); } catch (e) { /* non-fatal */ }
   return stats;
 }
 
@@ -1761,8 +1920,12 @@ function getPhoneCleanupReport_() {
 
 /* ----------------------- batch attach (per request) -------------------- */
 
+// PATCHED — uses CacheService (60 s TTL) so the heavy sheet read is shared across
+// concurrent requests in the same execution environment
 function phoneInfoMap_() {
-  if (PHONE_MAP_CACHE) return PHONE_MAP_CACHE;
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('phoneMap');
+  if (hit) { try { return JSON.parse(hit); } catch (e) { /* fall through */ } }
   var map = {};
   readAll_(sheet_(CONTACT_SHEET)).rows.forEach(function (r) {
     var id = cellStr_(r['COMPANY ID']);
@@ -1777,7 +1940,7 @@ function phoneInfoMap_() {
       entry.status = status;
     }
   });
-  PHONE_MAP_CACHE = map;
+  try { cache.put('phoneMap', JSON.stringify(map), 60); } catch (e) { /* non-fatal */ }
   return map;
 }
 
@@ -1802,15 +1965,18 @@ function attachPrimaryPhoneInfoToCallRows_(rows) { return attachPhoneInfo_(rows)
 
 /* ------------------------------- routes -------------------------------- */
 
-// Reads COMPANY MASTER regardless of DEMO/LIVE (shared source data).
+// PATCHED — user auth required. Reads COMPANY MASTER regardless of DEMO/LIVE (shared source data).
 function apiSyncContactNumbers_(p) {
+  verifyAnyUser_(p);
   var stats = syncCompanyContactNumbers_();
   stats.ok = true;
   stats.sheet = CONTACT_SHEET;
   return stats;
 }
 
+// PATCHED — user auth required
 function apiGetCompanyContactNumbers_(p) {
+  verifyAnyUser_(p);
   var companyId = String(p.companyId || '').trim();
   var statusFilter = String(p.status || '').trim().toUpperCase();
   var nums;
@@ -1827,13 +1993,17 @@ function apiGetCompanyContactNumbers_(p) {
   return { ok: true, count: nums.length, sheet: CONTACT_SHEET, numbers: nums };
 }
 
+// PATCHED — user auth required
 function apiGetPrimaryPhone_(p) {
+  verifyAnyUser_(p);
   var companyId = req_(p.companyId, 'companyId');
   var primary = getPrimaryPhoneForCompany_(companyId);
   return { ok: true, companyId: companyId, found: !!primary, primary: primary };
 }
 
+// PATCHED — user auth required
 function apiGetPhoneCleanupReport_(p) {
+  verifyAnyUser_(p);
   var report = getPhoneCleanupReport_();
   report.ok = true;
   return report;
@@ -2095,9 +2265,11 @@ function fetchSourcePage_(url) {
 
 /* ------------------------------- import --------------------------------- */
 
+// PATCHED — manager PIN verified + parallel URL fetching
 function apiImportPublicEvents_(p) {
+  var by = requireManager_(p.user || p.by, p.pin);
   var mode = normMode_(p.mode);
-  var user = String(p.user || 'SYSTEM').toUpperCase();
+  var user = by.code;
   var dryRun = String(p.dryRun || '').toLowerCase() === 'true';
   var sourceId = String(p.sourceId || '').trim();
   var fromDate = parseDate_(p.fromDate);
@@ -2143,30 +2315,63 @@ function apiImportPublicEvents_(p) {
     }));
   } else {
     // Option B: best-effort fetch of configured source URLs.
+    // PATCHED — use UrlFetchApp.fetchAll() for parallel fetching instead of sequential loop
     var srcSheet = sheet_('EVENT SOURCES');
-    sources.forEach(function (srcRow) {
-      var url = cellStr_(srcRow['SOURCE URL']);
-      if (!url) return;
-      result.scannedSources++;
-      var page = fetchSourcePage_(url);
-      var name = cellStr_(srcRow['SOURCE NAME']);
-      if (!page.ok) {
-        result.errors.push(name + ': fetch failed (' + page.error + ') — needs manual paste/import');
-      } else {
-        var cands = parseEventCandidatesFromText_(page.text, {
-          sourceName: name, sourceUrl: url,
-          venue: cellStr_(srcRow['DEFAULT VENUE']), city: cellStr_(srcRow['DEFAULT CITY'])
-        });
-        if (!cands.length) {
-          result.errors.push(name + ': page fetched but no parseable event listings (likely rendered by JavaScript) — needs manual paste/import');
+    var fetchableSources = sources.filter(function (r) { return !!cellStr_(r['SOURCE URL']); });
+    result.scannedSources = fetchableSources.length;
+    if (fetchableSources.length > 0) {
+      var requests = fetchableSources.map(function (srcRow) {
+        return {
+          url: cellStr_(srcRow['SOURCE URL']),
+          muteHttpExceptions: true,
+          followRedirects: true,
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SlingshotzCRM/1.0)' }
+        };
+      });
+      var responses;
+      try { responses = UrlFetchApp.fetchAll(requests); } catch (e) {
+        responses = fetchableSources.map(function () { return null; });
+      }
+      fetchableSources.forEach(function (srcRow, idx) {
+        var name = cellStr_(srcRow['SOURCE NAME']);
+        var url = cellStr_(srcRow['SOURCE URL']);
+        var resp = responses[idx];
+        var page;
+        if (!resp) {
+          page = { ok: false, error: 'fetchAll failed' };
+        } else {
+          var code = resp.getResponseCode();
+          if (code < 200 || code >= 400) {
+            page = { ok: false, error: 'HTTP ' + code };
+          } else {
+            var html = resp.getContentText();
+            var text = html
+              .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+              .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+              .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)[^>]*>/gi, '\n')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;|&amp;|&#\d+;|&[a-z]+;/gi, ' ');
+            page = { ok: true, text: text };
+          }
         }
-        allCandidates = allCandidates.concat(cands);
-      }
-      if (!dryRun) {
-        srcRow['LAST CHECKED'] = nowStr_();
-        writeObj_(srcSheet, srcRow._row, srcRow);
-      }
-    });
+        if (!page.ok) {
+          result.errors.push(name + ': fetch failed (' + page.error + ') — needs manual paste/import');
+        } else {
+          var cands = parseEventCandidatesFromText_(page.text, {
+            sourceName: name, sourceUrl: url,
+            venue: cellStr_(srcRow['DEFAULT VENUE']), city: cellStr_(srcRow['DEFAULT CITY'])
+          });
+          if (!cands.length) {
+            result.errors.push(name + ': page fetched but no parseable event listings (likely rendered by JavaScript) — needs manual paste/import');
+          }
+          allCandidates = allCandidates.concat(cands);
+        }
+        if (!dryRun) {
+          srcRow['LAST CHECKED'] = nowStr_();
+          writeObj_(srcSheet, srcRow._row, srcRow);
+        }
+      });
+    }
   }
 
   result.eventsFound = allCandidates.length;
@@ -2204,7 +2409,7 @@ function apiImportPublicEvents_(p) {
     var days = Math.ceil((start.getTime() - today.getTime()) / 86400000);
 
     var rec = {
-      'EVENT ID': 'EV-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      'EVENT ID': 'EV-' + uniqueId_(),
       'EVENT NAME': c.eventName,
       'CATEGORY': map ? map.category : 'Needs Review',
       'EVENT TYPE': map ? map.eventType : (business ? 'Trade / Business Event' : ''),
@@ -2247,7 +2452,9 @@ function normEventKey_(name, venue, startDate) {
 
 /* ------------------------- sources & map routes ------------------------- */
 
+// PATCHED — manager PIN verified
 function apiGetEventSources_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var includeInactive = String(p.all || '').toLowerCase() === 'true';
   var sources = readAll_(sheet_('EVENT SOURCES')).rows.map(function (r) {
     return {
@@ -2263,8 +2470,9 @@ function apiGetEventSources_(p) {
   return { ok: true, count: sources.length, sheet: 'EVENT SOURCES', sources: sources };
 }
 
+// PATCHED — manager PIN verified
 function apiUpsertEventSource_(p) {
-  var by = requireManager_(p.user || p.by);
+  var by = requireManager_(p.user || p.by, p.pin);
   var sh = sheet_('EVENT SOURCES');
   var data = readAll_(sh);
   var sourceId = String(p.sourceId || '').trim();
@@ -2299,7 +2507,9 @@ function apiUpsertEventSource_(p) {
   return { ok: false, error: 'Source not found: ' + sourceId };
 }
 
+// PATCHED — manager PIN verified
 function apiGetEventIndustryMap_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var rows = readAll_(sheet_('EVENT INDUSTRY MAP')).rows.map(function (r) {
     return {
       keyword: cellStr_(r['KEYWORD']), eventType: cellStr_(r['EVENT TYPE']),
@@ -2310,8 +2520,9 @@ function apiGetEventIndustryMap_(p) {
   return { ok: true, count: rows.length, sheet: 'EVENT INDUSTRY MAP', map: rows };
 }
 
+// PATCHED — manager PIN verified
 function apiUpsertEventIndustryMap_(p) {
-  var by = requireManager_(p.user || p.by);
+  var by = requireManager_(p.user || p.by, p.pin);
   var sh = sheet_('EVENT INDUSTRY MAP');
   var data = readAll_(sh);
   var keyword = req_(p.keyword, 'keyword');
@@ -2334,7 +2545,9 @@ function apiUpsertEventIndustryMap_(p) {
 
 /* --------------------------- review workflow ---------------------------- */
 
+// PATCHED — manager PIN verified
 function apiGetPublicEventCandidates_(p) {
+  requireManager_(p.by || p.user, p.pin);
   var mode = normMode_(p.mode);
   var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
   ensureEventColumns_(sh);
@@ -2369,20 +2582,23 @@ function setEventReview_(mode, eventId, user, reviewStatus, leadStatus) {
   return null;
 }
 
+// PATCHED — manager PIN verified
 function apiApprovePublicEvent_(p) {
-  var by = requireManager_(p.user || p.by);
+  var by = requireManager_(p.user || p.by, p.pin);
   var name = setEventReview_(normMode_(p.mode), req_(p.eventId, 'eventId'), by.code, 'VERIFIED', 'APPROVED FOR PROSPECTING');
   return name ? { ok: true, message: '"' + name + '" approved for prospecting.' } : { ok: false, error: 'Event not found.' };
 }
 
+// PATCHED — manager PIN verified
 function apiRejectPublicEvent_(p) {
-  var by = requireManager_(p.user || p.by);
+  var by = requireManager_(p.user || p.by, p.pin);
   var name = setEventReview_(normMode_(p.mode), req_(p.eventId, 'eventId'), by.code, 'REJECTED', 'NOT RELEVANT');
   return name ? { ok: true, message: '"' + name + '" marked not relevant.' } : { ok: false, error: 'Event not found.' };
 }
 
+// PATCHED — manager PIN verified
 function apiMarkEventDuplicate_(p) {
-  var by = requireManager_(p.user || p.by);
+  var by = requireManager_(p.user || p.by, p.pin);
   var name = setEventReview_(normMode_(p.mode), req_(p.eventId, 'eventId'), by.code, 'DUPLICATE', 'DUPLICATE');
   return name ? { ok: true, message: '"' + name + '" marked duplicate.' } : { ok: false, error: 'Event not found.' };
 }

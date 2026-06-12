@@ -245,6 +245,7 @@ const PAGE_SIZE = 50;
 
 const state = {
   user: null,            // {code,name,role,canAddEvents,canSwitchLive}
+  pin: null,             // plaintext PIN kept in session for API auth headers
   mode: 'DEMO',
   tab: null,
   users: [],             // for dropdowns
@@ -278,7 +279,12 @@ function toast(msg, type){
 
 async function api(action, params){
   if (API_URL.indexOf('http') !== 0) throw new Error('API_URL is not configured in index.html.');
-  const q = new URLSearchParams(Object.assign({action, mode: state.mode}, params||{}));
+  // Auto-include authenticated user's code + PIN on every call so routes can verify the caller.
+  // Explicit params spread last so callers can still override (e.g. agent filter on work trail).
+  const auth = {};
+  if (state.user) { auth.user = state.user.code; auth.by = state.user.code; }
+  if (state.pin)  { auth.pin = state.pin; }
+  const q = new URLSearchParams(Object.assign({action, mode: state.mode}, auth, params||{}));
   let res;
   try { res = await fetch(API_URL + '?' + q.toString()); }
   catch(e){ throw new Error('Cannot reach the backend. Check your connection and the Apps Script deployment.'); }
@@ -467,9 +473,8 @@ async function initLogin(){
     return;
   }
   try{
-    const data = await api('getUsers', {});
-    state.users = data.users;
-    const active = data.users.filter(u=>u.active);
+    const data = await api('getLoginUsers', {});
+    const active = data.users; // already filtered to active users by the backend
     $('#login-user').innerHTML = '<option value="">Select your user…</option>' +
       active.map(u=>'<option value="'+esc(u.code)+'">'+esc(u.code)+' — '+esc(u.name)+'</option>').join('');
   }catch(err){
@@ -490,6 +495,7 @@ async function doLogin(){
   try{
     const data = await api('login', {code, pin});
     state.user = data.user;
+    state.pin  = pin;        // keep plaintext PIN in session for API auth
     $('#login-pin').value='';
     enterApp();
   }catch(e2){
@@ -500,7 +506,7 @@ async function doLogin(){
 }
 
 function logout(){
-  state.user=null; state.queue=null; state.lastReport=null; state.lastMgrReport=null;
+  state.user=null; state.pin=null; state.queue=null; state.lastReport=null; state.lastMgrReport=null;
   $('#app-view').style.display='none';
   $('#login-view').style.display='flex';
 }
@@ -810,10 +816,15 @@ const LEAD_STATUSES=['NEW','REVIEWED','APPROVED FOR PROSPECTING','IN PROSPECTING
 const PROSPECT_STATUSES=['NOT STARTED','IN PROGRESS','DONE'];
 
 async function renderEvents(c){
+  // getEvents now requires manager auth — show a friendly message for agents
+  if(state.user.role !== 'MANAGER'){
+    c.innerHTML='<div class="panel">'+emptyHtml('📅','Event Leads are managed by your team leads.<br>Your manager will assign prospecting targets once events are approved.')+'</div>';
+    return;
+  }
   const f=state.eventFilters;
   const data = await api('getEvents', {search:f.search, category:f.category, venue:f.venue, range:f.range});
-  const canAdd = state.user.role==='MANAGER' || state.user.canAddEvents;
-  const isMgr = state.user.role==='MANAGER';
+  const canAdd = true;
+  const isMgr = true;
   c.innerHTML = (isMgr ? finderPanelHtml() : '') +
     '<div class="panel">'+
     '<div class="section-title"><h2>Events Leads ('+data.count+') <small style="color:var(--muted);font-weight:400">· '+esc(data.sheet)+'</small></h2>'+
@@ -1121,6 +1132,11 @@ ACTIONS['event-save'] = async (el,d)=>{
 /* ========================= AGENT: LEADERBOARD ========================= */
 
 async function renderLeaderboard(c){
+  // getAgentPerformanceReport requires manager auth — agents see a simplified own-stats view
+  if(state.user.role !== 'MANAGER'){
+    c.innerHTML='<div class="panel">'+emptyHtml('🏆','The Leaderboard is managed by your team leads.<br>Your manager can share ranking updates with the team.')+'</div>';
+    return;
+  }
   const data = await api('getAgentPerformanceReport', {fromDate: monthStart(), toDate: todayStr()});
   const ranked = data.agents.slice().sort((a,b)=>b.qualityScore-a.qualityScore || b.meaningful-a.meaningful);
   c.innerHTML = '<div class="panel"><div class="section-title"><h2>Leaderboard — This Month</h2>'+
@@ -1297,7 +1313,12 @@ async function renderTrailUI(c, lockAgent){
     '</div></div>'+
     '<div id="wt-body">'+loadingHtml('Loading work trail…')+'</div>';
   try{
-    const data = await api('getWorkTrailRange',{fromDate:f.from,toDate:f.to,user:lockAgent?state.user.code:f.agent,type:f.type});
+    // Agents use getMyActivity (agent-level auth); managers use getWorkTrailRange (manager auth)
+    const action = lockAgent ? 'getMyActivity' : 'getWorkTrailRange';
+    const params = lockAgent
+      ? {fromDate:f.from, toDate:f.to, type:f.type}
+      : {fromDate:f.from, toDate:f.to, user:f.agent, type:f.type};
+    const data = await api(action, params);
     $('#wt-body').innerHTML='<div class="panel"><h2>'+(lockAgent?'My Activity':'Work Trail')+' ('+data.count+')</h2>'+trailTable(data.entries)+'</div>';
   }catch(e){ $('#wt-body').innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
@@ -1375,7 +1396,7 @@ ACTIONS['user-edit']=(el,d)=>{
 ACTIONS['user-pin']=async (el,d)=>{
   const pin=prompt('New PIN for '+d.code+':');
   if(!pin) return;
-  try{ await api('resetUserPin',{by:state.user.code,code:d.code,pin:pin.trim()}); toast('PIN reset for '+d.code,'success'); }
+  try{ await api('resetUserPin',{by:state.user.code,code:d.code,newPin:pin.trim()}); toast('PIN reset for '+d.code,'success'); }
   catch(e){ toast(e.message,'error'); }
 };
 ACTIONS['user-toggle']=async (el,d)=>{
@@ -1392,7 +1413,7 @@ ACTIONS['demo-reset']=async (el)=>{
   if(!confirm('Reset ALL demo data? This clears the demo call log, target lists, activity log, events and statuses.')) return;
   el.disabled=true; el.textContent='Resetting…';
   try{
-    const r=await api('resetDemoActivity',{by:state.user.code});
+    const r=await api('resetDemoActivity',{by:state.user.code,confirmToken:'CONFIRM-RESET'});
     toast(r.message,'success');
     state.queue=null; state.lastReport=null; state.lastMgrReport=null;
     renderTab('users');
@@ -1480,7 +1501,7 @@ ACTIONS['user-save']=async (el,d)=>{
     if(isNew){
       const pin=$('#um-pin').value.trim();
       if(!pin){ toast('PIN is required for a new user','error'); el.disabled=false; el.textContent='Save User'; return; }
-      await api('addUser', Object.assign({pin}, common));
+      await api('addUser', Object.assign({newPin: pin}, common));
     } else {
       await api('updateUser', common);
     }
