@@ -84,7 +84,8 @@ var SHEET_HEADERS = {
     'TIMESTAMP', 'COMPANY ID', 'COMPANY NAME', 'AGENT', 'STATUS', 'ATTEMPTS', 'LAST RESULT', 'LAST CALL DATE'
   ],
   'USERS': [
-    'USER CODE', 'NAME', 'PIN', 'ROLE', 'ACTIVE', 'CAN ADD EVENTS', 'CAN SWITCH LIVE', 'CREATED AT', 'UPDATED AT'
+    'USER CODE', 'NAME', 'PIN', 'ROLE', 'ACTIVE', 'CAN ADD EVENTS', 'CAN SWITCH LIVE', 'CREATED AT', 'UPDATED AT',
+    'FAILED ATTEMPTS', 'LOCKED UNTIL'
   ],
   'APP ACTIVITY LOG': [
     'TIMESTAMP', 'USER', 'ACTIVITY TYPE', 'COMPANY ID', 'COMPANY NAME', 'DETAILS'
@@ -109,6 +110,12 @@ var SHEET_HEADERS = {
     'KEYWORD', 'EVENT TYPE', 'INDUSTRY CATEGORY', 'TARGET INDUSTRIES',
     'POSSIBLE REQUIREMENTS', 'PROSPECTING ANGLE'
   ],
+  'BID PIPELINE': [
+    'BID ID', 'COMPANY ID', 'COMPANY NAME', 'CALL ID', 'AGENT', 'MANAGER ASSIGNED',
+    'BID STAGE', 'BID TITLE', 'ESTIMATED VALUE (PHP)', 'SUBMISSION DEADLINE',
+    'DATE SUBMITTED', 'OUTCOME', 'OUTCOME DATE', 'OUTCOME NOTES',
+    'CREATED BY', 'CREATED AT', 'UPDATED BY', 'UPDATED AT', 'DELETED'
+  ],
   // Clean phone-number support table (one number per row). COMPANY MASTER
   // stays the main company database; this sheet only supplies callable numbers.
   // Shared across DEMO/LIVE like COMPANY MASTER (it derives from it).
@@ -123,7 +130,7 @@ var SHEET_HEADERS = {
 // Sheets that have a separate DEMO copy. COMPANY MASTER and USERS are shared
 // (COMPANY MASTER is read-only source data for DEMO mode).
 var MODE_SPECIFIC = {
-  'CALL LOG': 1, 'DAILY ACTION LIST': 1, 'APP ACTIVITY LOG': 1, 'EVENT MASTER': 1, 'COMPANY STATUS': 1
+  'CALL LOG': 1, 'DAILY ACTION LIST': 1, 'APP ACTIVITY LOG': 1, 'EVENT MASTER': 1, 'COMPANY STATUS': 1, 'BID PIPELINE': 1
 };
 
 /* ------------------------------ ENTRYPOINTS ---------------------------- */
@@ -212,7 +219,15 @@ function routes_() {
     'syncCompanyContactNumbers': apiSyncContactNumbers_,
     'getCompanyContactNumbers': apiGetCompanyContactNumbers_,
     'getPrimaryPhone': apiGetPrimaryPhone_,
-    'getPhoneCleanupReport': apiGetPhoneCleanupReport_
+    'getPhoneCleanupReport': apiGetPhoneCleanupReport_,
+    // bid pipeline
+    'createBid': apiCreateBid_,
+    'updateBidStage': apiUpdateBidStage_,
+    'getBidPipeline': apiGetBidPipeline_,
+    'getBidSummary': apiGetBidSummary_,
+    'deleteBid': apiDeleteBid_,
+    // user management
+    'unlockUser': apiUnlockUser_
   };
 }
 
@@ -498,18 +513,67 @@ function requireManager_(code, pin) {
   return uj;
 }
 
+function getLockStatus_(u) {
+  var lockedUntil = String(u['LOCKED UNTIL'] || '').trim();
+  if (!lockedUntil) return { locked: false, lockedUntil: '' };
+  var t = parseDate_(lockedUntil);
+  if (t && t.getTime() > Date.now()) return { locked: true, lockedUntil: lockedUntil };
+  return { locked: false, lockedUntil: '' };
+}
+
+function checkAndRecordFailedLogin_(u, sh) {
+  var lockStatus = getLockStatus_(u);
+  if (lockStatus.locked) throw new Error('Account locked. Try again after ' + lockStatus.lockedUntil + '.');
+  var count = Number(u['FAILED ATTEMPTS'] || 0) + 1;
+  if (count >= 5) {
+    var lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+    u['FAILED ATTEMPTS'] = 0;
+    u['LOCKED UNTIL'] = Utilities.formatDate(lockUntil, tz_(), 'yyyy-MM-dd HH:mm:ss');
+    u['UPDATED AT'] = nowStr_();
+    writeObj_(sh, u._row, u);
+    throw new Error('Too many failed attempts. Account locked for 15 minutes.');
+  }
+  u['FAILED ATTEMPTS'] = count;
+  u['UPDATED AT'] = nowStr_();
+  writeObj_(sh, u._row, u);
+  throw new Error('Incorrect PIN. ' + (5 - count) + ' attempt(s) remaining before lockout.');
+}
+
+function clearFailedLogin_(u, sh) {
+  u['FAILED ATTEMPTS'] = 0;
+  u['LOCKED UNTIL'] = '';
+  u['UPDATED AT'] = nowStr_();
+  writeObj_(sh, u._row, u);
+}
+
 function apiLogin_(p) {
-  var mode = normMode_(p.mode);
-  var code = req_(p.code, 'code');
-  var pin = req_(p.pin, 'pin');
-  var u = findUser_(code);
-  if (!u) return { ok: false, error: 'Unknown user code.' };
-  var uj = userJson_(u);
-  if (!uj.active) return { ok: false, error: 'This account is deactivated. Ask a manager to reactivate it.' };
-  // PATCHED — compare against hashed PIN
-  if (String(u['PIN']).trim() !== hashPin_(String(pin).trim())) return { ok: false, error: 'Incorrect PIN.' };
-  breadcrumb_(mode, uj.code, 'LOGIN', '', '', 'Logged in (' + mode + ' mode)');
-  return { ok: true, mode: mode, user: uj };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
+    var mode = normMode_(p.mode);
+    var code = req_(p.code, 'code');
+    var pin = req_(p.pin, 'pin');
+    var sh = sheet_('USERS');
+    var data = readAll_(sh);
+    var u = null;
+    for (var i = 0; i < data.rows.length; i++) {
+      if (String(data.rows[i]['USER CODE']).trim().toUpperCase() === code.toUpperCase()) {
+        u = data.rows[i];
+        break;
+      }
+    }
+    if (!u) return { ok: false, error: 'Unknown user code.' };
+    var uj = userJson_(u);
+    if (!uj.active) return { ok: false, error: 'This account is deactivated. Ask a manager to reactivate it.' };
+    var lockStatus = getLockStatus_(u);
+    if (lockStatus.locked) return { ok: false, error: 'Account locked. Try again after ' + lockStatus.lockedUntil + '.' };
+    if (String(u['PIN']).trim() !== hashPin_(String(pin).trim())) {
+      try { checkAndRecordFailedLogin_(u, sh); } catch (e) { return { ok: false, error: e.message }; }
+    }
+    clearFailedLogin_(u, sh);
+    breadcrumb_(mode, uj.code, 'LOGIN', '', '', 'Logged in (' + mode + ' mode)');
+    return { ok: true, mode: mode, user: uj };
+  } finally { lock.releaseLock(); }
 }
 
 // Agent-level: returns only the authenticated user's own work trail entries.
@@ -2604,4 +2668,232 @@ function apiMarkEventDuplicate_(p) {
   var by = requireManager_(p.by, p.pin);
   var name = setEventReview_(normMode_(p.mode), req_(p.eventId, 'eventId'), by.code, 'DUPLICATE', 'DUPLICATE');
   return name ? { ok: true, message: '"' + name + '" marked duplicate.' } : { ok: false, error: 'Event not found.' };
+}
+
+/* ====================================================================== */
+/* BID PIPELINE                                                            */
+/* Tracks bids from BIDDING REQUIREMENT call results through to closure.  */
+/* Sheet: BID PIPELINE (mode-specific; DEMO BID PIPELINE for demo mode).  */
+/* ====================================================================== */
+
+var BID_STAGES = ['IDENTIFIED', 'QUALIFYING', 'PROPOSAL PREP', 'SUBMITTED', 'AWARDED', 'LOST', 'NO DECISION'];
+var BID_CLOSED_STAGES = { 'AWARDED': 1, 'LOST': 1, 'NO DECISION': 1 };
+
+function bidSheet_(mode) { return sheet_(modeSheetName_('BID PIPELINE', mode)); }
+
+function bidJson_(r) {
+  return {
+    bidId: cellStr_(r['BID ID']),
+    companyId: cellStr_(r['COMPANY ID']),
+    companyName: cellStr_(r['COMPANY NAME']),
+    callId: cellStr_(r['CALL ID']),
+    agent: cellStr_(r['AGENT']),
+    managerAssigned: cellStr_(r['MANAGER ASSIGNED']),
+    bidStage: cellStr_(r['BID STAGE']),
+    bidTitle: cellStr_(r['BID TITLE']),
+    estimatedValue: cellStr_(r['ESTIMATED VALUE (PHP)']),
+    submissionDeadline: cellStr_(r['SUBMISSION DEADLINE']),
+    dateSubmitted: cellStr_(r['DATE SUBMITTED']),
+    outcome: cellStr_(r['OUTCOME']),
+    outcomeDate: cellStr_(r['OUTCOME DATE']),
+    outcomeNotes: cellStr_(r['OUTCOME NOTES']),
+    createdBy: cellStr_(r['CREATED BY']),
+    createdAt: cellStr_(r['CREATED AT']),
+    updatedBy: cellStr_(r['UPDATED BY']),
+    updatedAt: cellStr_(r['UPDATED AT']),
+    deleted: String(r['DELETED']).toUpperCase() === 'TRUE'
+  };
+}
+
+function apiCreateBid_(p) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
+    var by = requireManager_(p.by, p.pin);
+    var mode = normMode_(p.mode);
+    var companyId = req_(p.companyId, 'companyId');
+    var bidTitle = req_(p.bidTitle, 'bidTitle');
+    var now = nowStr_();
+    var bidId = 'BID-' + uniqueId_();
+    // Resolve company name from COMPANY MASTER
+    var companyName = '';
+    var masterData = readAll_(companyMasterSheet_());
+    for (var i = 0; i < masterData.rows.length; i++) {
+      if (cellStr_(masterData.rows[i]['COMPANY ID']) === companyId) {
+        companyName = cellStr_(masterData.rows[i]['COMPANY NAME']);
+        break;
+      }
+    }
+    // Resolve agent from call log if callId provided
+    var agent = '';
+    var callId = String(p.callId || '').trim();
+    if (callId) {
+      var callData = readAll_(sheet_(modeSheetName_('CALL LOG', mode)));
+      for (var j = 0; j < callData.rows.length; j++) {
+        if (cellStr_(callData.rows[j]['CALL ID']) === callId) {
+          agent = cellStr_(callData.rows[j]['AGENT']);
+          break;
+        }
+      }
+    }
+    appendObj_(bidSheet_(mode), {
+      'BID ID': bidId, 'COMPANY ID': companyId, 'COMPANY NAME': companyName,
+      'CALL ID': callId, 'AGENT': agent, 'MANAGER ASSIGNED': by.code,
+      'BID STAGE': 'IDENTIFIED', 'BID TITLE': bidTitle,
+      'ESTIMATED VALUE (PHP)': String(p.estimatedValue || ''),
+      'SUBMISSION DEADLINE': String(p.submissionDeadline || ''),
+      'DATE SUBMITTED': '', 'OUTCOME': '', 'OUTCOME DATE': '', 'OUTCOME NOTES': '',
+      'CREATED BY': by.code, 'CREATED AT': now, 'UPDATED BY': by.code, 'UPDATED AT': now, 'DELETED': 'FALSE'
+    });
+    breadcrumb_(mode, by.code, 'BID CREATED', companyId, companyName, 'Bid created: ' + bidTitle + ' (' + bidId + ')');
+    return { ok: true, message: 'Bid created.', bidId: bidId };
+  } finally { lock.releaseLock(); }
+}
+
+function apiUpdateBidStage_(p) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
+    var by = requireManager_(p.by, p.pin);
+    var mode = normMode_(p.mode);
+    var bidId = req_(p.bidId, 'bidId');
+    var newStage = req_(p.newStage, 'newStage').toUpperCase();
+    if (BID_STAGES.indexOf(newStage) === -1) {
+      return { ok: false, error: 'Invalid bid stage. Must be one of: ' + BID_STAGES.join(', ') };
+    }
+    if (BID_CLOSED_STAGES[newStage]) {
+      if (!String(p.outcome || '').trim()) return { ok: false, error: 'outcome is required when closing a bid.' };
+      if (!String(p.outcomeDate || '').trim()) return { ok: false, error: 'outcomeDate is required when closing a bid.' };
+    }
+    var sh = bidSheet_(mode);
+    var data = readAll_(sh);
+    for (var i = 0; i < data.rows.length; i++) {
+      var r = data.rows[i];
+      if (cellStr_(r['BID ID']) !== bidId) continue;
+      if (String(r['DELETED']).toUpperCase() === 'TRUE') return { ok: false, error: 'Bid is deleted.' };
+      var now = nowStr_();
+      r['BID STAGE'] = newStage;
+      r['UPDATED BY'] = by.code;
+      r['UPDATED AT'] = now;
+      if (newStage === 'SUBMITTED' && !cellStr_(r['DATE SUBMITTED'])) r['DATE SUBMITTED'] = now;
+      if (BID_CLOSED_STAGES[newStage]) {
+        r['OUTCOME'] = String(p.outcome).trim();
+        r['OUTCOME DATE'] = String(p.outcomeDate).trim();
+        r['OUTCOME NOTES'] = String(p.outcomeNotes || '');
+        if (newStage === 'AWARDED' || newStage === 'LOST') {
+          var newAccountStatus = newStage === 'AWARDED' ? 'BID WON' : 'BID LOST';
+          var companyId = cellStr_(r['COMPANY ID']);
+          var statusSh = sheet_(modeSheetName_('COMPANY STATUS', mode));
+          var statusData = readAll_(statusSh);
+          for (var j = 0; j < statusData.rows.length; j++) {
+            if (cellStr_(statusData.rows[j]['COMPANY ID']) === companyId) {
+              statusData.rows[j]['ACCOUNT STATUS'] = newAccountStatus;
+              statusData.rows[j]['LAST UPDATED BY'] = by.code;
+              statusData.rows[j]['LAST UPDATED AT'] = now;
+              writeObj_(statusSh, statusData.rows[j]._row, statusData.rows[j]);
+              break;
+            }
+          }
+        }
+      }
+      writeObj_(sh, r._row, r);
+      breadcrumb_(mode, by.code, 'BID UPDATED', cellStr_(r['COMPANY ID']), cellStr_(r['COMPANY NAME']),
+        'Bid stage → ' + newStage + ' (' + bidId + ')');
+      return { ok: true, message: 'Bid stage updated to ' + newStage + '.', bidId: bidId };
+    }
+    return { ok: false, error: 'Bid not found: ' + bidId };
+  } finally { lock.releaseLock(); }
+}
+
+function apiGetBidPipeline_(p) {
+  requireManager_(p.by, p.pin);
+  var mode = normMode_(p.mode);
+  var fStage = String(p.stage || '').trim().toUpperCase();
+  var fCompanyId = String(p.companyId || '').trim();
+  var fAgent = String(p.agent || '').trim().toUpperCase();
+  var from = String(p.fromDate || '').trim();
+  var to = String(p.toDate || '').trim();
+  var bids = readAll_(bidSheet_(mode)).rows.map(bidJson_).filter(function(b) {
+    if (b.deleted) return false;
+    if (fStage && b.bidStage !== fStage) return false;
+    if (fCompanyId && b.companyId !== fCompanyId) return false;
+    if (fAgent && b.agent !== fAgent) return false;
+    if ((from || to) && !inRange_(parseDate_(b.createdAt), from, to)) return false;
+    return true;
+  });
+  return { ok: true, count: bids.length, mode: mode, bids: bids };
+}
+
+function apiGetBidSummary_(p) {
+  requireManager_(p.by, p.pin);
+  var mode = normMode_(p.mode);
+  var all = readAll_(bidSheet_(mode)).rows.map(bidJson_).filter(function(b) { return !b.deleted; });
+  var byStage = {};
+  BID_STAGES.forEach(function(s) { byStage[s] = 0; });
+  var pipelineValue = 0;
+  var awarded = 0, closed = 0, daysTotal = 0, daysCount = 0;
+  all.forEach(function(b) {
+    byStage[b.bidStage] = (byStage[b.bidStage] || 0) + 1;
+    if (!BID_CLOSED_STAGES[b.bidStage]) {
+      pipelineValue += parseFloat(String(b.estimatedValue).replace(/[^0-9.]/g, '')) || 0;
+    }
+    if (b.bidStage === 'AWARDED') { awarded++; closed++; }
+    else if (b.bidStage === 'LOST') { closed++; }
+    if (b.bidStage === 'AWARDED') {
+      var created = parseDate_(b.createdAt);
+      var outcome = parseDate_(b.outcomeDate);
+      if (created && outcome) { daysTotal += Math.round((outcome.getTime() - created.getTime()) / 86400000); daysCount++; }
+    }
+  });
+  return {
+    ok: true, mode: mode, total: all.length, byStage: byStage, pipelineValue: pipelineValue,
+    winRate: closed > 0 ? Math.round((awarded / closed) * 100) : null,
+    avgDaysToAward: daysCount > 0 ? Math.round(daysTotal / daysCount) : null
+  };
+}
+
+function apiDeleteBid_(p) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
+    var by = requireManager_(p.by, p.pin);
+    var mode = normMode_(p.mode);
+    var bidId = req_(p.bidId, 'bidId');
+    var sh = bidSheet_(mode);
+    var data = readAll_(sh);
+    for (var i = 0; i < data.rows.length; i++) {
+      var r = data.rows[i];
+      if (cellStr_(r['BID ID']) !== bidId) continue;
+      r['DELETED'] = 'TRUE';
+      r['UPDATED BY'] = by.code;
+      r['UPDATED AT'] = nowStr_();
+      writeObj_(sh, r._row, r);
+      breadcrumb_(mode, by.code, 'BID DELETED', cellStr_(r['COMPANY ID']), cellStr_(r['COMPANY NAME']),
+        'Bid deleted: ' + cellStr_(r['BID TITLE']) + ' (' + bidId + ')');
+      return { ok: true, message: 'Bid ' + bidId + ' deleted.' };
+    }
+    return { ok: false, error: 'Bid not found: ' + bidId };
+  } finally { lock.releaseLock(); }
+}
+
+/* ====================================================================== */
+/* USER MANAGEMENT — UNLOCK                                                */
+/* ====================================================================== */
+
+function apiUnlockUser_(p) {
+  var by = requireManager_(p.by, p.pin);
+  var code = req_(p.code, 'code').toUpperCase();
+  var sh = sheet_('USERS');
+  var data = readAll_(sh);
+  for (var i = 0; i < data.rows.length; i++) {
+    var u = data.rows[i];
+    if (String(u['USER CODE']).trim().toUpperCase() !== code) continue;
+    u['FAILED ATTEMPTS'] = 0;
+    u['LOCKED UNTIL'] = '';
+    u['UPDATED AT'] = nowStr_();
+    writeObj_(sh, u._row, u);
+    breadcrumb_(normMode_(p.mode), by.code, 'USER UPDATED', '', '', 'Unlocked user ' + code);
+    return { ok: true, message: 'User ' + code + ' unlocked.' };
+  }
+  return { ok: false, error: 'User not found: ' + code };
 }
