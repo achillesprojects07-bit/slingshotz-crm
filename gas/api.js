@@ -634,7 +634,7 @@ function apiGetUsers_(p) {
   return { ok: true, count: users.length, sheet: 'USERS', users: users };
 }
 
-// PATCHED — manager PIN verified; new user PIN passed as p.newPin and stored hashed
+// PATCHED — manager PIN verified; new user PIN passed as p.newPin and stored hashed; initializes FAILED ATTEMPTS and LOCKED UNTIL
 function apiAddUser_(p) {
   var by = requireManager_(p.by, p.pin);
   var code = req_(p.code, 'code').toUpperCase();
@@ -647,7 +647,8 @@ function apiAddUser_(p) {
     'ACTIVE': 'TRUE',
     'CAN ADD EVENTS': String(p.canAddEvents || 'TRUE').toUpperCase() === 'FALSE' ? 'FALSE' : 'TRUE',
     'CAN SWITCH LIVE': String(p.canSwitchLive || 'FALSE').toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
-    'CREATED AT': now, 'UPDATED AT': now
+    'CREATED AT': now, 'UPDATED AT': now,
+    'FAILED ATTEMPTS': 0, 'LOCKED UNTIL': ''
   });
   breadcrumb_(normMode_(p.mode), by.code, 'USER ADDED', '', '', 'Added user ' + code);
   return { ok: true, message: 'User ' + code + ' added.', sheet: 'USERS' };
