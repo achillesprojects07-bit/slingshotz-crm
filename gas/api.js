@@ -431,10 +431,10 @@ function seedUsers_() {
   var now = nowStr_();
   var h = hashPin_('1111');
   var seed = [
-    ['ARN', 'Aileen Narciso', h, 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now],
-    ['MRY', 'Miggy Yanquiling', h, 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now],
-    ['BRN', 'Brian Noble', h, 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now],
-    ['MGO', 'Magoe Narisma', h, 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now]
+    ['ARN', 'Aileen Narciso', h, 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now, 0, ''],
+    ['MRY', 'Miggy Yanquiling', h, 'MANAGER', 'TRUE', 'TRUE', 'TRUE', now, now, 0, ''],
+    ['BRN', 'Brian Noble', h, 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now, 0, ''],
+    ['MGO', 'Magoe Narisma', h, 'AGENT', 'TRUE', 'TRUE', 'FALSE', now, now, 0, '']
   ];
   sh.getRange(2, 1, seed.length, seed[0].length).setValues(seed);
 }
@@ -473,12 +473,14 @@ function migrateHashPins_() {
   });
 }
 
-// PATCHED — verify user code + PIN; throws on any mismatch
+// PATCHED — verify user code + PIN + lockout status; throws on any mismatch
 function verifyUser_(code, pin) {
   var u = findUser_(req_(code, 'user'));
   if (!u) throw new Error('Unknown user: ' + code);
   var uj = userJson_(u);
   if (!uj.active) throw new Error('User account is deactivated: ' + code);
+  var lockStatus = getLockStatus_(u);
+  if (lockStatus.locked) throw new Error('Account locked until ' + lockStatus.lockedUntil + '. Ask a manager to unlock your account.');
   if (String(u['PIN']).trim() !== hashPin_(String(pin || ''))) throw new Error('Incorrect PIN.');
   return uj;
 }
@@ -502,13 +504,15 @@ function userJson_(u) {
   };
 }
 
-// PATCHED — now verifies PIN in addition to manager role
+// PATCHED — verifies PIN + manager role + lockout status
 function requireManager_(code, pin) {
   var u = findUser_(req_(code, 'by'));
   if (!u) throw new Error('Unknown user: ' + code);
   var uj = userJson_(u);
   if (!uj.active) throw new Error('User is deactivated: ' + code);
   if (uj.role !== 'MANAGER') throw new Error('Manager permission required for this action.');
+  var lockStatus = getLockStatus_(u);
+  if (lockStatus.locked) throw new Error('Account locked until ' + lockStatus.lockedUntil + '. Ask another manager to unlock your account.');
   if (String(u['PIN']).trim() !== hashPin_(String(pin || ''))) throw new Error('Incorrect PIN.');
   return uj;
 }
@@ -2560,7 +2564,7 @@ function apiUpsertEventSource_(p) {
     var obj = { 'SOURCE ID': sourceId, 'ACTIVE': 'TRUE' };
     for (var h in fields) if (fields[h] !== undefined && fields[h] !== '') obj[h] = fields[h];
     appendObj_(sh, obj);
-    breadcrumb_('DEMO', by.code, 'EVENT ADDED', '', p.sourceName, 'Event source added (' + sourceId + ')');
+    breadcrumb_(normMode_(p.mode), by.code, 'EVENT ADDED', '', p.sourceName, 'Event source added (' + sourceId + ')');
     return { ok: true, message: 'Source added.', sourceId: sourceId };
   }
   for (var i = 0; i < data.rows.length; i++) {
