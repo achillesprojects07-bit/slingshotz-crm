@@ -116,6 +116,19 @@ var SHEET_HEADERS = {
     'DATE SUBMITTED', 'OUTCOME', 'OUTCOME DATE', 'OUTCOME NOTES',
     'CREATED BY', 'CREATED AT', 'UPDATED BY', 'UPDATED AT', 'DELETED'
   ],
+  // Pre-computed daily stats written by the refreshDailySummary() trigger.
+  // Shared (not mode-specific) — MODE column separates DEMO vs LIVE rows.
+  'DAILY SUMMARY': [
+    'DATE', 'MODE', 'AGENT', 'CALLS', 'MEANINGFUL', 'BIDS', 'MEETINGS',
+    'PROFILES SENT', 'EVENTS FOUND', 'RETRY CASES', 'FOLLOW UPS', 'LAST UPDATED'
+  ],
+  // Long-term call log storage. Rows older than the cutoff are moved here by
+  // archiveOldCalls. Shared — ARCHIVED FROM MODE column tracks origin.
+  'CALL LOG ARCHIVE': [
+    'TIMESTAMP', 'CALL ID', 'COMPANY ID', 'COMPANY NAME', 'AGENT', 'CALL RESULT',
+    'FOLLOW UP DATE', 'CLIENT EVENT NAME', 'CLIENT EVENT DATE', 'NOTES',
+    'ARCHIVED AT', 'ARCHIVED FROM MODE'
+  ],
   // Clean phone-number support table (one number per row). COMPANY MASTER
   // stays the main company database; this sheet only supplies callable numbers.
   // Shared across DEMO/LIVE like COMPANY MASTER (it derives from it).
@@ -226,6 +239,9 @@ function routes_() {
     'getBidPipeline': apiGetBidPipeline_,
     'getBidSummary': apiGetBidSummary_,
     'deleteBid': apiDeleteBid_,
+    // performance / archival
+    'getDailySummary': apiGetDailySummary_,
+    'archiveOldCalls': apiArchiveOldCalls_,
     // user management
     'unlockUser': apiUnlockUser_
   };
@@ -412,6 +428,8 @@ function setupSheets() {
   for (var b in MODE_SPECIFIC) sheet_('DEMO ' + b);
   ensureEventColumns_(sheet_('EVENT MASTER'));
   ensureEventColumns_(sheet_('DEMO EVENT MASTER'));
+  sheet_('DAILY SUMMARY');
+  sheet_('CALL LOG ARCHIVE');
   seedUsers_();
   migrateHashPins_(); // PATCHED — hash any plaintext PINs on every setup run
   seedEventSources_();
@@ -963,7 +981,8 @@ function apiRemoveTarget_(p) {
 
 /* ----------------------------- CALL LOGGING ----------------------------- */
 
-function callRows_(mode) {
+// OPTIMIZED — optional fromDate cuts read cost on large call logs
+function callRows_(mode, fromDate) {
   var rows = readAll_(sheet_(modeSheetName_('CALL LOG', mode))).rows;
   return rows.map(function (r) {
     var when = whenOf_(r);
@@ -981,7 +1000,11 @@ function callRows_(mode) {
       clientEventDate: cellStr_(r['CLIENT EVENT DATE']),
       notes: cellStr_(r['NOTES'])
     };
-  }).filter(function (c) { return c.companyId || c.companyName; });
+  }).filter(function (c) {
+    if (!c.companyId && !c.companyName) return false;
+    if (fromDate && c.when && c.when.getTime() < fromDate.getTime()) return false;
+    return true;
+  });
 }
 
 function stripWhen_(c) {
@@ -1201,7 +1224,10 @@ function apiAgentDashboard_(p) {
     .map(targetJson_)
     .filter(function (t) { return t.agent === user && t.status === 'PENDING'; });
 
-  var calls = callRows_(mode);
+  // OPTIMIZED — only load last 180 days for follow-up calculations
+  var oneEightyDaysAgo = new Date();
+  oneEightyDaysAgo.setDate(oneEightyDaysAgo.getDate() - 180);
+  var calls = callRows_(mode, oneEightyDaysAgo);
   var myCalls = calls.filter(function (c) { return c.agent === user; });
   var today = dayStr_(new Date());
   var todayCalls = myCalls.filter(function (c) { return c.day === today; }).map(stripWhen_);
@@ -1268,6 +1294,187 @@ function agentStatsFromCalls_(calls, lastActivityByAgent) {
     out.push(s);
   }
   return out.sort(function (x, y) { return y.calls - x.calls; });
+}
+
+// OPTIMIZED — called by time-driven trigger every 15 minutes.
+// Computes today's per-agent call stats and writes them to DAILY SUMMARY sheet.
+// Safe to run multiple times — upserts by DATE + MODE + AGENT key.
+function refreshDailySummary() {
+  var today = dayStr_(new Date());
+  var sh = sheet_('DAILY SUMMARY');
+  var now = nowStr_();
+
+  ['DEMO', 'LIVE'].forEach(function(mode) {
+    var calls = callRows_(mode);
+    var todayCalls = calls.filter(function(c) { return c.day === today; });
+
+    var byAgent = {};
+    todayCalls.forEach(function(c) {
+      var a = c.agent || '?';
+      if (!byAgent[a]) {
+        byAgent[a] = { calls:0, meaningful:0, bids:0, meetings:0,
+                       profilesSent:0, eventsFound:0, retryCases:0, followUps:0 };
+      }
+      byAgent[a].calls++;
+      if (MEANINGFUL_RESULTS[c.result]) byAgent[a].meaningful++;
+      if (c.result === 'BIDDING REQUIREMENT') byAgent[a].bids++;
+      if (MEETING_RESULTS[c.result]) byAgent[a].meetings++;
+      if (c.result === 'COMPANY PROFILE SENT') byAgent[a].profilesSent++;
+      if (c.result === 'EVENT IDENTIFIED') byAgent[a].eventsFound++;
+      if (RETRY_RESULTS[c.result]) byAgent[a].retryCases++;
+      if (FOLLOWUP_RESULTS[c.result] || c.followUpDate) byAgent[a].followUps++;
+    });
+
+    var data = readAll_(sh);
+    var updatedAgents = {};
+
+    for (var i = 0; i < data.rows.length; i++) {
+      var r = data.rows[i];
+      var rDate = cellStr_(r['DATE']);
+      var rMode = cellStr_(r['MODE']).toUpperCase();
+      var rAgent = cellStr_(r['AGENT']).toUpperCase();
+      if (rDate !== today || rMode !== mode) continue;
+      var stats = byAgent[rAgent];
+      if (!stats) continue;
+      r['CALLS'] = stats.calls;
+      r['MEANINGFUL'] = stats.meaningful;
+      r['BIDS'] = stats.bids;
+      r['MEETINGS'] = stats.meetings;
+      r['PROFILES SENT'] = stats.profilesSent;
+      r['EVENTS FOUND'] = stats.eventsFound;
+      r['RETRY CASES'] = stats.retryCases;
+      r['FOLLOW UPS'] = stats.followUps;
+      r['LAST UPDATED'] = now;
+      writeObj_(sh, r._row, r);
+      updatedAgents[rAgent] = true;
+    }
+
+    for (var agent in byAgent) {
+      if (updatedAgents[agent]) continue;
+      var s = byAgent[agent];
+      appendObj_(sh, {
+        'DATE': today, 'MODE': mode, 'AGENT': agent,
+        'CALLS': s.calls, 'MEANINGFUL': s.meaningful, 'BIDS': s.bids,
+        'MEETINGS': s.meetings, 'PROFILES SENT': s.profilesSent,
+        'EVENTS FOUND': s.eventsFound, 'RETRY CASES': s.retryCases,
+        'FOLLOW UPS': s.followUps, 'LAST UPDATED': now
+      });
+    }
+  });
+}
+
+// OPTIMIZED — reads pre-computed daily summary instead of scanning call log
+function apiGetDailySummary_(p) {
+  requireManager_(p.by, p.pin);
+  var mode = normMode_(p.mode);
+  var fromDate = String(p.fromDate || '').trim();
+  var toDate = String(p.toDate || '').trim();
+  var agent = String(p.agent || '').trim().toUpperCase();
+  if (agent === 'ALL') agent = '';
+
+  var rows = readAll_(sheet_('DAILY SUMMARY')).rows.filter(function(r) {
+    if (cellStr_(r['MODE']).toUpperCase() !== mode) return false;
+    if (agent && cellStr_(r['AGENT']).toUpperCase() !== agent) return false;
+    var d = parseDate_(cellStr_(r['DATE']));
+    if (fromDate || toDate) {
+      if (!inRange_(d, fromDate, toDate)) return false;
+    }
+    return true;
+  }).map(function(r) {
+    return {
+      date: cellStr_(r['DATE']),
+      mode: cellStr_(r['MODE']),
+      agent: cellStr_(r['AGENT']),
+      calls: Number(r['CALLS'] || 0),
+      meaningful: Number(r['MEANINGFUL'] || 0),
+      bids: Number(r['BIDS'] || 0),
+      meetings: Number(r['MEETINGS'] || 0),
+      profilesSent: Number(r['PROFILES SENT'] || 0),
+      eventsFound: Number(r['EVENTS FOUND'] || 0),
+      retryCases: Number(r['RETRY CASES'] || 0),
+      followUps: Number(r['FOLLOW UPS'] || 0),
+      lastUpdated: cellStr_(r['LAST UPDATED'])
+    };
+  }).sort(function(a, b) {
+    return String(b.date).localeCompare(String(a.date));
+  });
+
+  return { ok: true, count: rows.length, mode: mode, summary: rows };
+}
+
+// OPTIMIZED — moves call log rows older than cutoffDays to CALL LOG ARCHIVE.
+// Manager only. Default cutoff is 180 days. Pass cutoffDays=90 to be more aggressive.
+// Always run with dryRun=true first to see how many rows would be moved.
+// Safe to run multiple times — only moves rows not already archived.
+function apiArchiveOldCalls_(p) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { ok: false, error: 'Server busy, please try again.' };
+  try {
+    var by = requireManager_(p.by, p.pin);
+    var mode = normMode_(p.mode);
+    var cutoffDays = Math.max(30, Number(p.cutoffDays || 180));
+    var dryRun = String(p.dryRun || 'true').toLowerCase() !== 'false';
+
+    var cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - cutoffDays);
+    var cutoffStr = dayStr_(cutoff);
+
+    var srcSh = sheet_(modeSheetName_('CALL LOG', mode));
+    var archSh = sheet_('CALL LOG ARCHIVE');
+    var now = nowStr_();
+
+    var data = readAll_(srcSh);
+    var toArchive = [];
+    var toKeepRows = [data.headers.map(function(h) { return h; })];
+
+    data.rows.forEach(function(r) {
+      var when = whenOf_(r);
+      var day = when ? dayStr_(when) : '';
+      if (day && day < cutoffStr) {
+        toArchive.push(r);
+      } else {
+        var row = data.headers.map(function(h) { return r[h] !== undefined ? r[h] : ''; });
+        toKeepRows.push(row);
+      }
+    });
+
+    if (!dryRun && toArchive.length > 0) {
+      var archHeaders = archSh.getRange(1, 1, 1, archSh.getLastColumn())
+        .getValues()[0].map(normHeader_);
+      var archRows = toArchive.map(function(r) {
+        return archHeaders.map(function(h) {
+          if (h === 'ARCHIVED AT') return now;
+          if (h === 'ARCHIVED FROM MODE') return mode;
+          return r[h] !== undefined ? r[h] : '';
+        });
+      });
+      archSh.getRange(archSh.getLastRow() + 1, 1, archRows.length, archRows[0].length)
+        .setValues(archRows);
+
+      srcSh.clearContents();
+      srcSh.getRange(1, 1, toKeepRows.length, toKeepRows[0].length)
+        .setValues(toKeepRows);
+      srcSh.setFrozenRows(1);
+    }
+
+    breadcrumb_(mode, by.code, 'CALL LOG ARCHIVED', '', '',
+      (dryRun ? '[DRY RUN] ' : '') + toArchive.length + ' calls older than ' +
+      cutoffDays + ' days (cutoff: ' + cutoffStr + ')');
+
+    return {
+      ok: true,
+      dryRun: dryRun,
+      mode: mode,
+      cutoffDays: cutoffDays,
+      cutoffDate: cutoffStr,
+      rowsArchived: dryRun ? 0 : toArchive.length,
+      rowsWouldArchive: toArchive.length,
+      rowsRemaining: toKeepRows.length - 1,
+      message: dryRun
+        ? 'DRY RUN: ' + toArchive.length + ' rows would be archived. Pass dryRun=false to proceed.'
+        : toArchive.length + ' rows archived to CALL LOG ARCHIVE.'
+    };
+  } finally { lock.releaseLock(); }
 }
 
 // PATCHED — manager PIN verified
