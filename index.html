@@ -107,6 +107,7 @@
   .due-overdue{color:var(--bad)} .due-today{color:var(--warn)} .due-upcoming{color:var(--good)} .due-needs{color:var(--meet)}
   .fu-card .notes{font-size:12.5px;background:#f8fafc;border-radius:7px;padding:7px}
   .fu-actions{display:flex;gap:7px;margin-top:auto;padding-top:5px}
+  .fu-card.fu-urgent{border-color:var(--warn);background:var(--warn-soft)}
 
   /* ---------- modal ---------- */
   #modal-root{position:fixed;inset:0;z-index:50;display:none;align-items:flex-start;justify-content:center;background:rgba(15,23,42,.5);padding:24px 12px;overflow-y:auto}
@@ -155,6 +156,11 @@
   .stats-grid .stat{background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px}
   .stats-grid .stat b{display:block;font-size:20px}
   .stats-grid .stat span{font-size:11.5px;color:var(--muted);font-weight:600}
+
+  /* ---------- today's call funnel ---------- */
+  .funnel-flow{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+  .funnel-row{display:flex;align-items:center;justify-content:space-between;border-radius:8px;padding:9px 14px;font-weight:600;font-size:13.5px}
+  .funnel-sub{margin-left:24px;border-radius:7px;padding:7px 12px;font-size:12.5px}
 
   @media(max-width:640px){
     .cards{grid-template-columns:repeat(2,1fr)}
@@ -250,7 +256,7 @@ const state = {
   tab: null,
   users: [],             // for dropdowns
   queue: null,           // Add Targets cache {companies, categories}
-  queueFilters: { cat:'', search:'', page:1 },
+  queueFilters: { cat:'', search:'', eventsJoined:'', page:1 },
   dashCard: 'targets',   // selected agent dashboard card
   mgrKpi: 'calls',       // selected manager KPI
   mgrFilters: null,
@@ -607,7 +613,7 @@ function callTable(rows, opts){
 
 function followupCards(rows){
   if(!rows.length) return emptyHtml('✅','No open follow-ups. Nice and clean!');
-  return '<div class="fu-grid">'+rows.map(f=>'<div class="fu-card">'+
+  return '<div class="fu-grid">'+rows.map(f=>'<div class="fu-card'+(f.dueState==='overdue'||f.dueState==='due-today'?' fu-urgent':'')+'">'+
     '<div class="co">'+esc(f.companyName)+'</div>'+
     '<div class="meta">'+esc(f.companyId)+' · Agent: <b>'+esc(f.agent)+'</b> · Logged '+esc(f.loggedAt)+'</div>'+
     '<div>'+resultPill(f.result)+'</div>'+
@@ -639,11 +645,32 @@ function targetTable(rows){
 
 /* ========================= AGENT: DASHBOARD =========================== */
 
+function renderFunnel(todayCalls, needsActionCount){
+  const fRow = (bg,text,count,cls)=>
+    '<div class="funnel-row'+(cls?' '+cls:'')+'" style="background:'+bg+';color:#fff"><span>'+text+'</span><b>'+count+'</b></div>';
+  const noContact = todayCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase())).length;
+  const closed    = todayCalls.filter(c=>CLOSED.has(String(c.result||'').toUpperCase())).length;
+  const mFull     = todayCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase()));
+  const subtypes  = {};
+  mFull.forEach(c=>{ const r=String(c.result||'').toUpperCase(); subtypes[r]=(subtypes[r]||0)+1; });
+  const total = todayCalls.length;
+  if(!total && !needsActionCount) return '';
+  return '<div class="panel"><div class="section-title"><h2>Today\'s Call Funnel</h2></div>'+
+    '<div class="funnel-flow">'+
+    fRow('#1A3A6B','📞 Calls Made Today',total)+
+    (noContact ? fRow('#6b7280','No Contact — retry later',noContact) : '')+
+    (closed    ? fRow('var(--bad)','Closed / Done',closed) : '')+
+    (mFull.length ? fRow('#1A3A6B','Follow-Up Opened',mFull.length) : '')+
+    Object.entries(subtypes).sort((a,b)=>b[1]-a[1]).map(([r,n])=>fRow('#F59E0B','↳ '+esc(r),n,'funnel-sub')).join('')+
+    (needsActionCount ? fRow('#F97316','Retry Cap Reached (total in list)',needsActionCount) : '')+
+    '</div></div>';
+}
+
 const DASH_CARDS = [
   {key:'targets', label:'My Target List'},
   {key:'followups', label:'My Follow-Ups'},
   {key:'meetings', label:'My Meetings Set'},
-  {key:'needsAction', label:'Needs Action'},
+  {key:'needsAction', label:'Unreached Companies'},
   {key:'dailyTarget', label:'Daily Target'},
   {key:'completedToday', label:'Completed Today'},
   {key:'remainingToday', label:'Remaining Today'}
@@ -657,6 +684,7 @@ async function renderAgentDashboard(c){
       '<div class="stat-card'+(state.dashCard===card.key?' selected':'')+'" data-action="dash-card" data-key="'+card.key+'">'+
       '<div class="num">'+rep.counts[card.key]+'</div><div class="lbl">'+card.label+'</div></div>').join('')+
     '</div>'+
+    renderFunnel(rep.todayCalls||[], rep.counts.needsAction||0)+
     '<div class="panel"><div class="section-title"><h2 id="dash-detail-title"></h2></div><div id="dash-detail"></div></div>';
   renderDashDetail();
 }
@@ -675,7 +703,7 @@ function renderDashDetail(){
   if (key==='targets'){ title.textContent='My Target List ('+rep.counts.targets+')'; box.innerHTML=targetTable(rep.targets); }
   else if (key==='followups'){ title.textContent='My Follow-Ups ('+rep.counts.followups+')'; box.innerHTML=followupCards(rep.followups); }
   else if (key==='meetings'){ title.textContent='My Meetings Set ('+rep.counts.meetings+')'; box.innerHTML=followupCards(rep.meetings); }
-  else if (key==='needsAction'){ title.textContent='Needs Action — retry cases ('+rep.counts.needsAction+')'; box.innerHTML=targetTable(rep.needsAction); }
+  else if (key==='needsAction'){ title.textContent='Unreached Companies ('+rep.counts.needsAction+')'; box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a meaningful result. Review and try again when ready.</p>'+targetTable(rep.needsAction); }
   else { title.textContent='Calls Completed Today ('+rep.counts.completedToday+' of '+rep.counts.dailyTarget+')'; box.innerHTML=callTable(rep.todayCalls,{hideAgent:true}); }
 }
 
@@ -715,12 +743,15 @@ async function renderAddTargets(c){
       '<div class="field"><label>Category</label><select id="q-cat"><option value="">All categories</option>'+
         q.categories.map(cat=>'<option'+(f.cat===cat?' selected':'')+'>'+esc(cat)+'</option>').join('')+'</select></div>'+
       '<div class="field" style="max-width:320px"><label>Search</label><input id="q-search" value="'+esc(f.search)+'" placeholder="Company, contact, phone, email…"></div>'+
+      '<div class="field" style="max-width:260px"><label>Events Joined</label><input id="q-events" value="'+esc(f.eventsJoined)+'" placeholder="Filter by event name…"></div>'+
     '</div>'+
     '<div id="q-list"></div>'+
     '</div>';
   $('#q-cat').addEventListener('change', e=>{ f.cat=e.target.value; f.page=1; renderQueueList(); });
   let deb;
   $('#q-search').addEventListener('input', e=>{ clearTimeout(deb); deb=setTimeout(()=>{ f.search=e.target.value.trim().toLowerCase(); f.page=1; renderQueueList(); },250); });
+  let debEv;
+  $('#q-events').addEventListener('input', e=>{ clearTimeout(debEv); debEv=setTimeout(()=>{ f.eventsJoined=e.target.value.trim().toLowerCase(); f.page=1; renderQueueList(); },250); });
   renderQueueList();
 }
 
@@ -734,6 +765,9 @@ function filteredQueue(){
     const hay=(co.companyName+' '+co.companyId+' '+co.primaryContact+' '+co.phone+' '+co.mobile+' '+co.email+' '+co.category).toLowerCase();
     return hay.indexOf(f.search)!==-1;
   });
+  if (f.eventsJoined) list = list.filter(co=>
+    String(co.eventsParticipated||'').toLowerCase().indexOf(f.eventsJoined)!==-1
+  );
   return list;
 }
 
@@ -761,7 +795,7 @@ function renderQueueList(){
           ? '<button class="btn btn-sm" disabled>Already Added</button>'
           : '<button class="btn btn-sm btn-primary" data-action="add-target" data-cid="'+esc(co.companyId)+'" data-cname="'+esc(co.companyName)+'">Add to Targets</button>')+
         ' <button class="btn btn-sm" data-action="view-history" data-cid="'+esc(co.companyId)+'" data-cname="'+esc(co.companyName)+'">History</button>'+
-        (isMgr?' <button class="btn btn-sm btn-ghost" data-action="edit-company" data-cid="'+esc(co.companyId)+'">Edit</button>':'')+
+        ' <button class="btn btn-sm btn-ghost" data-action="edit-company" data-cid="'+esc(co.companyId)+'">Edit</button>'+
       '</td>'+
     '</tr>').join('')+'</tbody></table></div>'+
     '<div class="pager">Showing '+(start+1)+'–'+(start+page.length)+' of '+list.length+
@@ -792,9 +826,24 @@ async function renderFollowups(c){
   // Same backend report as the dashboard card → counts always match.
   const rep = await api('getAgentDashboardReport', {user: state.user.code});
   state.lastReport = rep;
-  c.innerHTML = '<div class="panel"><div class="section-title"><h2>My Follow-Ups ('+rep.counts.followups+')</h2>'+
-    '<button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+
-    followupCards(rep.followups)+'</div>';
+  if(!state.fuRange) state.fuRange = 'all';
+  const DUE_ORDER = {overdue:0,'due-today':1,upcoming:2};
+  const sorted = [...rep.followups].sort((a,b)=>(DUE_ORDER[a.dueState]??3)-(DUE_ORDER[b.dueState]??3));
+  const filtered = state.fuRange==='urgent' ? sorted.filter(f=>f.dueState==='overdue'||f.dueState==='due-today')
+                 : state.fuRange==='upcoming' ? sorted.filter(f=>f.dueState==='upcoming')
+                 : sorted;
+  c.innerHTML = '<div class="panel">'+
+    '<div class="section-title"><h2>My Follow-Ups ('+filtered.length+(filtered.length!==rep.counts.followups?' of '+rep.counts.followups:'')+')</h2>'+
+    '<div style="display:flex;gap:8px;align-items:center">'+
+      '<select id="fu-range" style="width:auto;padding:5px 10px;font-size:12.5px">'+
+        '<option value="all"'+(state.fuRange==='all'?' selected':'')+'>All open</option>'+
+        '<option value="urgent"'+(state.fuRange==='urgent'?' selected':'')+'>Overdue / Due today</option>'+
+        '<option value="upcoming"'+(state.fuRange==='upcoming'?' selected':'')+'>Upcoming</option>'+
+      '</select>'+
+      '<button class="btn btn-sm" data-action="reload-tab">Refresh</button>'+
+    '</div></div>'+
+    followupCards(filtered)+'</div>';
+  $('#fu-range').addEventListener('change', e=>{ state.fuRange=e.target.value; renderFollowups(c); });
 }
 
 /* ======================= AGENT: ACTIVITY LOG ========================== */
@@ -816,15 +865,10 @@ const LEAD_STATUSES=['NEW','REVIEWED','APPROVED FOR PROSPECTING','IN PROSPECTING
 const PROSPECT_STATUSES=['NOT STARTED','IN PROGRESS','DONE'];
 
 async function renderEvents(c){
-  // getEvents now requires manager auth — show a friendly message for agents
-  if(state.user.role !== 'MANAGER'){
-    c.innerHTML='<div class="panel">'+emptyHtml('📅','Event Leads are managed by your team leads.<br>Your manager will assign prospecting targets once events are approved.')+'</div>';
-    return;
-  }
   const f=state.eventFilters;
   const data = await api('getEvents', {search:f.search, category:f.category, venue:f.venue, range:f.range});
-  const canAdd = true;
-  const isMgr = true;
+  const isMgr = state.user.role === 'MANAGER';
+  const canAdd = isMgr || state.user.canAddEvents;
   c.innerHTML = (isMgr ? finderPanelHtml() : '') +
     '<div class="panel">'+
     '<div class="section-title"><h2>Events Leads ('+data.count+') <small style="color:var(--muted);font-weight:400">· '+esc(data.sheet)+'</small></h2>'+
@@ -1054,7 +1098,7 @@ function eventTable(events){
       '<td class="nowrap">'+
         '<button class="btn btn-sm btn-ghost" data-action="ev-find-companies" data-eid="'+esc(ev.eventId)+'">Find Companies</button> '+
         (canAdd?'<button class="btn btn-sm" data-action="event-edit" data-eid="'+esc(ev.eventId)+'">Edit</button> ':'')+
-        (isMgr?'<button class="btn btn-sm btn-danger" data-action="event-delete" data-eid="'+esc(ev.eventId)+'" data-ename="'+esc(ev.eventName)+'">Delete</button>':'')+
+        (canAdd?'<button class="btn btn-sm btn-danger" data-action="event-delete" data-eid="'+esc(ev.eventId)+'" data-ename="'+esc(ev.eventName)+'">Delete</button>':'')+
       '</td>'+
     '</tr>').join('')+'</tbody></table></div>';
 }
@@ -1084,8 +1128,8 @@ function openEventModal(ev){
       '<div><label>Organizer</label><input id="evm-org" value="'+esc(ev.organizer||'')+'"></div>'+
       '<div><label>Event Type</label><input id="evm-type" value="'+esc(ev.eventType||'')+'" placeholder="Expo, Conference, Summit…"></div>'+
       '<div><label>City</label><input id="evm-city" value="'+esc(ev.city||'')+'"></div>'+
-      '<div><label>Review Status</label><select id="evm-review"><option value="">—</option>'+['NEEDS REVIEW','VERIFIED','NEEDS DATE CHECK','NEEDS SOURCE CHECK','DUPLICATE','REJECTED'].map(s=>'<option'+((ev.reviewStatus||'')===s?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
-      '<div><label>Confidence</label><select id="evm-conf"><option value="">—</option>'+['HIGH','MEDIUM','LOW'].map(s=>'<option'+((ev.confidenceLevel||'')===s?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
+      (state.user.role==='MANAGER'?'<div><label>Review Status</label><select id="evm-review"><option value="">—</option>'+['NEEDS REVIEW','VERIFIED','NEEDS DATE CHECK','NEEDS SOURCE CHECK','DUPLICATE','REJECTED'].map(s=>'<option'+((ev.reviewStatus||'')===s?' selected':'')+'>'+s+'</option>').join('')+'</select></div>':'')+
+      (state.user.role==='MANAGER'?'<div><label>Confidence</label><select id="evm-conf"><option value="">—</option>'+['HIGH','MEDIUM','LOW'].map(s=>'<option'+((ev.confidenceLevel||'')===s?' selected':'')+'>'+s+'</option>').join('')+'</select></div>':'')+
       '<div class="full"><label>Prospecting Angle</label><input id="evm-angle" value="'+esc(ev.prospectingAngle||'')+'" placeholder="Why exhibitors here need Slingshotz…"></div>'+
       '<div><label>Start Date</label><input id="evm-start" type="date" value="'+esc(ev.startDate||'')+'"></div>'+
       '<div><label>End Date</label><input id="evm-end" type="date" value="'+esc(ev.endDate||'')+'"></div>'+
@@ -1118,7 +1162,7 @@ ACTIONS['event-save'] = async (el,d)=>{
       leadStatus: $('#evm-status').value, prospectingStatus: $('#evm-pstatus').value,
       prospectingStartDate: $('#evm-pstart').value, notes: $('#evm-notes').value.trim(),
       eventType: $('#evm-type').value.trim(), city: $('#evm-city').value.trim(),
-      reviewStatus: $('#evm-review').value, confidenceLevel: $('#evm-conf').value,
+      reviewStatus: ($('#evm-review')||{}).value||'', confidenceLevel: ($('#evm-conf')||{}).value||'',
       prospectingAngle: $('#evm-angle').value.trim()
     });
     // Per spec: close modal, clear filters, range = all future, reload, toast.

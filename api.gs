@@ -814,13 +814,13 @@ function apiGetCallQueue_(p) {
   };
 }
 
-// PATCHED — manager PIN verified + write lock + collision-proof company ID
+// CHANGED — any authenticated user + write lock + collision-proof company ID
 function apiUpsertCompany_(p) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
   try {
   var mode = normMode_(p.mode);
-  var by = requireManager_(p.by, p.pin);
+  var by = verifyAnyUser_(p);
   var sh = companyMasterSheet_();
   var data = readAll_(sh);
   var params = {
@@ -1826,7 +1826,8 @@ function apiGetEvents_(p) {
 // PATCHED — manager PIN verified + collision-proof event ID
 function apiUpsertEvent_(p) {
   var mode = normMode_(p.mode);
-  var by = requireManager_(p.by, p.pin);
+  var by = verifyAnyUser_(p);
+  if (!by.canAddEvents) throw new Error('You do not have permission to add or edit events.');
   var user = by.code;
   var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
   var now = nowStr_();
@@ -1849,6 +1850,7 @@ function apiUpsertEvent_(p) {
     var obj = { 'EVENT ID': eventId, 'CREATED BY': user, 'CREATED AT': now, 'UPDATED BY': user, 'UPDATED AT': now, 'DELETED': 'FALSE',
                 'DATE FOUND': now, 'LAST CHECKED': now };
     for (var h in fields) obj[h] = fields[h] || '';
+    if (!obj['REVIEW STATUS']) obj['REVIEW STATUS'] = 'NEEDS REVIEW';
     appendObj_(sh, obj);
     breadcrumb_(mode, user, 'EVENT ADDED', '', p.eventName, 'Event lead added (' + eventId + ')');
     return { ok: true, message: 'Event lead saved.', eventId: eventId, sheet: sh.getName() };
@@ -1869,10 +1871,11 @@ function apiUpsertEvent_(p) {
   return { ok: false, error: 'Event not found: ' + eventId };
 }
 
-// PATCHED — manager PIN verified
+// PATCHED — canAddEvents permission required
 function apiDeleteEvent_(p) {
   var mode = normMode_(p.mode);
-  var by = requireManager_(p.by, p.pin);
+  var by = verifyAnyUser_(p);
+  if (!by.canAddEvents) throw new Error('You do not have permission to delete events.');
   var user = by.code;
   var eventId = req_(p.eventId, 'eventId');
   var sh = sheet_(modeSheetName_('EVENT MASTER', mode));
