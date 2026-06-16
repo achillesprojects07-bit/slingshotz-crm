@@ -179,7 +179,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b>B3 NEXT ACTION CLEANUP</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue</div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -198,7 +198,7 @@
   <header class="app">
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
-      <span class="badge badge-demo" id="mode-badge">DEMO</span> <span class="badge badge-demo">B3 NEXT ACTION CLEANUP</span>
+      <span class="badge badge-demo" id="mode-badge">DEMO</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -237,20 +237,16 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 // ⬇⬇⬇ PASTE YOUR APPS SCRIPT WEB APP URL (ends in /exec) HERE ⬇⬇⬇
 const API_URL = 'https://script.google.com/macros/s/AKfycbwov4NPqYNVKUokep_8crBARjgkmV0wizcJoCyxLFs5AT2oERSM2Fo6NqpmW2tvIQNI/exec';
 
-const CALL_RESULT_GROUPS = [
-  {label:'Calls to Retry', results:['NO ANSWER','BUSY / TRY AGAIN']},
-  {label:'Follow-Ups Due', results:['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']},
-  {label:'Meetings Booked', results:['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']},
-  {label:'Review Company Details', results:['WRONG NUMBER','NUMBER UNREACHABLE']},
-  {label:'Closed / Not Leads', results:['NO REQUIREMENT','NOT INTERESTED']}
+const CALL_RESULTS = [
+  'ASKED TO CALL BACK','BIDDING REQUIREMENT','BUSY / TRY AGAIN','COMPANY PROFILE SENT',
+  'COMPANY PROFILE MEETING SET','CONTACT PERSON NOT AVAILABLE','EVENT IDENTIFIED',
+  'PROJECT BRIEFING MEETING SET','NO ANSWER','NO REQUIREMENT','NOT INTERESTED',
+  'NUMBER UNREACHABLE','WRONG NUMBER'
 ];
-const CALL_RESULTS = CALL_RESULT_GROUPS.flatMap(g=>g.results);
 const MEANINGFUL = new Set(['ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
-const FOLLOWUP = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']);
-const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN']);
+const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILABLE']);
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
-const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
-const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
+const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED','NUMBER UNREACHABLE','WRONG NUMBER']);
 const PAGE_SIZE = 50;
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -318,26 +314,14 @@ function resultPill(result){
   if (MEETING.has(result)) cls='pill-meet';
   else if (MEANINGFUL.has(result)) cls='pill-good';
   else if (RETRY.has(result)) cls='pill-retry';
-  else if (REVIEW_DETAILS.has(result)) cls='pill-retry';
   else if (CLOSED.has(result)) cls='pill-closed';
   return '<span class="pill '+cls+'">'+esc(result||'—')+'</span>';
 }
 
-function callResultOptions(selected){
-  selected = String(selected||'').toUpperCase();
-  return CALL_RESULT_GROUPS.map(g=>
-    '<optgroup label="'+esc(g.label)+'">'+
-    g.results.map(r=>'<option value="'+esc(r)+'"'+(selected===r?' selected':'')+'>'+esc(r)+'</option>').join('')+
-    '</optgroup>'
-  ).join('');
-}
-
 function dueLabel(f){
-  const result = String(f.result||'').toUpperCase();
-  const isMeeting = MEETING.has(result);
-  if (f.needsDate) return '<span class="due due-needs">Needs '+(isMeeting?'meeting':'follow-up')+' date</span>';
-  const map={overdue:['due-overdue','Overdue: '],'due-today':['due-today','Due today: '],upcoming:['due-upcoming',(isMeeting?'Meeting: ':'Follow-up: ')]};
-  const m=map[f.dueState]||['due-upcoming',(isMeeting?'Meeting: ':'')];
+  if (f.needsDate) return '<span class="due due-needs">Needs follow-up date</span>';
+  const map={'overdue':['due-overdue','Overdue: '],'due-today':['due-today','Due today: '],'upcoming':['due-upcoming','Follow-up: ']};
+  const m=map[f.dueState]||['due-upcoming',''];
   return '<span class="due '+m[0]+'">'+m[1]+esc(f.followUpDate)+'</span>';
 }
 
@@ -687,13 +671,13 @@ function renderFunnel(todayCalls, needsActionCount){
 }
 
 const DASH_CARDS = [
-  {key:'completedToday', label:'My Calls Today'},
-  {key:'productiveToday', label:'My Productive Calls'},
-  {key:'followups', label:'My Follow-Ups Due'},
-  {key:'meetings', label:'My Meetings Booked'},
-  {key:'retryToday', label:'My Calls to Retry'},
-  {key:'reviewDetails', label:'Review Company Details'},
-  {key:'targetProgress', label:'My Target Progress'}
+  {key:'targets', label:'My Target List'},
+  {key:'followups', label:'My Follow-Ups'},
+  {key:'meetings', label:'My Meetings Set'},
+  {key:'needsAction', label:'Unreached Companies'},
+  {key:'dailyTarget', label:'Daily Target'},
+  {key:'completedToday', label:'Completed Today'},
+  {key:'remainingToday', label:'Remaining Today'}
 ];
 
 async function renderAgentDashboard(c){
@@ -720,29 +704,11 @@ function renderDashDetail(){
   const box=$('#dash-detail'), title=$('#dash-detail-title');
   if(!box) return;
   const key = state.dashCard;
-  if (key==='targets'){
-    title.textContent='My Target List ('+rep.counts.targets+')';
-    box.innerHTML=targetTable(rep.targets||[]);
-  } else if (key==='followups'){
-    title.textContent='My Follow-Ups Due ('+rep.counts.followups+')';
-    box.innerHTML=followupCards(rep.followups||[]);
-  } else if (key==='meetings'){
-    title.textContent='My Meetings Booked ('+rep.counts.meetings+')';
-    box.innerHTML=followupCards(rep.meetings||[]);
-  } else if (key==='reviewDetails'){
-    title.textContent='Review Company Details ('+(rep.counts.reviewDetails||0)+')';
-    box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">Wrong number or unreachable number. Check phone, mobile, contact person, or alternate contact before calling again.</p>'+callTable(rep.reviewDetails||[],{hideAgent:true});
-  } else if (key==='retryToday'){
-    const retryCalls=(rep.todayCalls||[]).filter(c=>RETRY.has(String(c.result||'').toUpperCase()));
-    title.textContent='My Calls to Retry Today ('+retryCalls.length+')';
-    box.innerHTML=callTable(retryCalls,{hideAgent:true});
-  } else if (key==='needsAction'){
-    title.textContent='Retry Cap Reached ('+rep.counts.needsAction+')';
-    box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap for NO ANSWER or BUSY / TRY AGAIN.</p>'+targetTable(rep.needsAction||[]);
-  } else {
-    title.textContent=(key==='productiveToday'?'My Productive Calls Today':'Calls Completed Today')+' ('+(rep.todayCalls||[]).length+')';
-    box.innerHTML=callTable(key==='productiveToday' ? (rep.todayCalls||[]).filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase())) : rep.todayCalls,{hideAgent:true});
-  }
+  if (key==='targets'){ title.textContent='My Target List ('+rep.counts.targets+')'; box.innerHTML=targetTable(rep.targets); }
+  else if (key==='followups'){ title.textContent='My Follow-Ups ('+rep.counts.followups+')'; box.innerHTML=followupCards(rep.followups); }
+  else if (key==='meetings'){ title.textContent='My Meetings Set ('+rep.counts.meetings+')'; box.innerHTML=followupCards(rep.meetings); }
+  else if (key==='needsAction'){ title.textContent='Unreached Companies ('+rep.counts.needsAction+')'; box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a meaningful result. Review and try again when ready.</p>'+targetTable(rep.needsAction); }
+  else { title.textContent='Calls Completed Today ('+rep.counts.completedToday+' of '+rep.counts.dailyTarget+')'; box.innerHTML=callTable(rep.todayCalls,{hideAgent:true}); }
 }
 
 /* ======================= AGENT: MY TARGET LIST ======================== */
@@ -776,7 +742,10 @@ async function renderAddTargets(c){
   c.innerHTML =
     '<div class="panel">'+
     '<div class="section-title"><h2>Company Database ('+q.count+' companies)</h2>'+
-    '<button class="btn btn-sm" data-action="queue-refresh">Reload Database</button></div>'+
+    '<div style="display:flex;gap:8px;">'+
+    '<button class="btn btn-primary btn-sm" data-action="company-new">+ Add Company</button>'+
+    '<button class="btn btn-sm" data-action="queue-refresh">Reload Database</button>'+
+    '</div></div>'+
     '<div class="filter-bar">'+
       '<div class="field"><label>Category</label><select id="q-cat"><option value="">All categories</option>'+
         q.categories.map(cat=>'<option'+(f.cat===cat?' selected':'')+'>'+esc(cat)+'</option>').join('')+'</select></div>'+
@@ -1343,7 +1312,7 @@ function attentionList(items){
   return items.map(it=>'<div class="attn-item attn-p'+it.priority+'">'+
     '<div style="flex:1"><b>'+esc(it.companyName)+'</b> <small style="color:var(--muted)">'+esc(it.companyId)+' · '+esc(it.agent)+'</small>'+
     '<div style="font-size:12.5px;margin-top:2px"><b>'+esc(it.reason)+'</b> · '+resultPill(it.result)+
-    (it.followUpDate?' · '+(MEETING.has(String(it.result||'').toUpperCase())?'meeting ':'follow-up ')+esc(it.followUpDate):'')+
+    (it.followUpDate?' · follow-up '+esc(it.followUpDate):'')+
     (it.clientEventName?' · 🎪 '+esc(it.clientEventName)+(it.clientEventDate?' ('+esc(it.clientEventDate)+')':''):'')+'</div>'+phoneLine(it)+'</div>'+
     '<div class="nowrap">'+callActions(it.companyId,it.companyName)+'</div>'+
   '</div>').join('');
@@ -1771,8 +1740,8 @@ async function openCallModal(companyId, companyName, historyOnly){
     (historyOnly?'':
       '<div class="form-grid">'+
         '<div class="full"><label>Call Result *</label><select id="cm-result"><option value="">Select result…</option>'+
-          callResultOptions()+'</select></div>'+
-        '<div><label id="cm-date-label">Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+ 
+          CALL_RESULTS.map(r=>'<option>'+r+'</option>').join('')+'</select></div>'+
+        '<div><label>Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+
         '<div><label>Client Event Date</label><input type="date" id="cm-evdate"></div>'+
         '<div class="full"><label>Client Event Name</label><input id="cm-evname" placeholder="e.g. Product launch, trade show booth…"></div>'+
         '<div class="full"><label>Notes</label><textarea id="cm-notes" rows="3" placeholder="What happened on the call?"></textarea></div>'+
@@ -1784,22 +1753,12 @@ async function openCallModal(companyId, companyName, historyOnly){
     (historyOnly?'':'<button class="btn btn-primary" data-action="call-save" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Save Call</button>')+
     '</div>'
   );
-  const resEl = $('#cm-result');
-  const dateLabel = $('#cm-date-label');
-  const updateCallDateLabel = ()=>{
-    if(!resEl || !dateLabel) return;
-    const r = String(resEl.value||'').toUpperCase();
-    if(MEETING.has(r)) dateLabel.textContent='Meeting Date *';
-    else if(FOLLOWUP.has(r)) dateLabel.textContent='Follow-Up Date *';
-    else dateLabel.textContent='Next Follow-Up Date';
-  };
-  if(resEl){ resEl.addEventListener('change', updateCallDateLabel); updateCallDateLabel(); }
   try{
     const data = await api('getCallHistory',{companyId});
     const box=$('#cm-history'); if(!box) return;
     box.innerHTML = data.history.length ? data.history.map(h=>
       '<div class="hist-item"><div class="top"><span><b>'+esc(h.agent)+'</b> · '+esc(h.timestamp)+'</span>'+resultPill(h.result)+'</div>'+
-      (h.followUpDate?'<div>'+(MEETING.has(String(h.result||'').toUpperCase())?'Meeting date':'Follow-up')+': <b>'+esc(h.followUpDate)+'</b></div>':'')+
+      (h.followUpDate?'<div>Follow-up: <b>'+esc(h.followUpDate)+'</b></div>':'')+
       (h.clientEventName?'<div>🎪 '+esc(h.clientEventName)+(h.clientEventDate?' ('+esc(h.clientEventDate)+')':'')+'</div>':'')+
       (h.notes?'<div style="color:var(--muted)">'+esc(h.notes)+'</div>':'')+
       (state.user && state.user.role==='MANAGER' && String(h.result||'').toUpperCase()==='BIDDING REQUIREMENT' ? '<div style="margin-top:7px"><button class="btn btn-sm btn-primary" data-action="bid-from-call" data-cid="'+esc(h.companyId||companyId)+'" data-cname="'+esc(h.companyName||companyName)+'" data-call="'+esc(h.callId||'')+'">Create Bid from this Call</button></div>' : '')+
@@ -1819,14 +1778,11 @@ ACTIONS['bid-from-call']=(el,d)=>{
 ACTIONS['call-save']=async (el,d)=>{
   const result=$('#cm-result').value;
   if(!result){ toast('Please select a call result','error'); return; }
-  const followUpDate = $('#cm-fudate').value;
-  if(MEETING.has(result) && !followUpDate){ toast('Please enter the meeting date before saving this meeting.','error'); return; }
-  if(FOLLOWUP.has(result) && !followUpDate){ toast('Please enter a follow-up date for this call result.','error'); return; }
   el.disabled=true; el.textContent='Saving…';
   try{
     await api('logCall',{
       user: state.user.code, companyId: d.cid, companyName: d.cname, result,
-      followUpDate: followUpDate, clientEventName: $('#cm-evname').value.trim(),
+      followUpDate: $('#cm-fudate').value, clientEventName: $('#cm-evname').value.trim(),
       clientEventDate: $('#cm-evdate').value, notes: $('#cm-notes').value.trim()
     });
     toast('Call logged','success');
@@ -1843,9 +1799,17 @@ ACTIONS['edit-company']=(el,d)=>{
   if(co) openCompanyModal(co);
 };
 
+ACTIONS['company-new'] = () => {
+  openCompanyModal({
+    companyId:'', companyName:'', category:'', primaryContact:'',
+    title:'', phone:'', mobile:'', email:'',
+    otherContacts:'', eventsParticipated:'', possibleRequirements:''
+  });
+};
+
 function openCompanyModal(co){
   openModal(
-    '<div class="modal-head"><h2>Edit Company — '+esc(co.companyName)+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-head"><h2>'+(co.companyId ? 'Edit Company — '+esc(co.companyName) : 'Add New Company')+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
     '<div class="modal-body"><div class="form-grid">'+
       '<div class="full"><label>Company Name *</label><input id="com-name" value="'+esc(co.companyName)+'"></div>'+
       '<div><label>Industry / Category</label><input id="com-cat" value="'+esc(co.category)+'"></div>'+
