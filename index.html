@@ -203,7 +203,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B1.1 DATE FILTERS</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B2 MEETING ALERTS</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -223,7 +223,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B1.1 DATE FILTERS</span>
+      <span class="build-tag" id="app-build-tag">B2 MEETING ALERTS</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -275,7 +275,7 @@ const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILA
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED','NUMBER UNREACHABLE','WRONG NUMBER']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B1.1 DATE FILTERS';
+const APP_BUILD = 'B2 MEETING ALERTS';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -1860,9 +1860,9 @@ async function renderUsers(c){
   c.innerHTML =
     '<div class="panel"><div class="section-title"><h2>Users ('+data.count+')</h2>'+
       '<button class="btn btn-primary btn-sm" data-action="user-new">+ Add User</button></div>'+
-    '<div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Status</th><th>Events</th><th>LIVE Switch</th><th></th></tr></thead><tbody>'+
+    '<div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Events</th><th>LIVE Switch</th><th></th></tr></thead><tbody>'+
     data.users.map(u=>'<tr>'+
-      '<td><b>'+esc(u.code)+'</b></td><td>'+esc(u.name)+'</td>'+
+      '<td><b>'+esc(u.code)+'</b></td><td>'+esc(u.name)+'</td><td>'+esc(u.email||'')+'</td>'+
       '<td><span class="pill '+(u.role==='MANAGER'?'pill-meet':'pill-neutral')+'">'+esc(u.role)+'</span></td>'+
       '<td><span class="pill '+(u.active?'pill-good':'pill-closed')+'">'+(u.active?'ACTIVE':'INACTIVE')+'</span></td>'+
       '<td>'+(u.canAddEvents?'✓':'—')+'</td><td>'+(u.canSwitchLive?'✓':'—')+'</td>'+
@@ -1981,6 +1981,7 @@ function openUserModal(u){
     '<div class="modal-body"><div class="form-grid">'+
       '<div><label>User Code *</label><input id="um-code" value="'+esc(u.code||'')+'" '+(isNew?'':'disabled')+' placeholder="e.g. JDC" style="text-transform:uppercase"></div>'+
       '<div><label>Name *</label><input id="um-name" value="'+esc(u.name||'')+'"></div>'+
+      '<div><label>Email</label><input id="um-email" type="email" value="'+esc(u.email||'')+'" placeholder="manager@email.com"></div>'+
       (isNew?'<div><label>PIN *</label><input id="um-pin" placeholder="e.g. 4321"></div>':'')+
       '<div><label>Role</label><select id="um-role"><option'+(u.role!=='MANAGER'?' selected':'')+'>AGENT</option><option'+(u.role==='MANAGER'?' selected':'')+'>MANAGER</option></select></div>'+
       '<div><label>Can Add Events</label><select id="um-events"><option value="TRUE"'+(u.canAddEvents!==false?' selected':'')+'>Yes</option><option value="FALSE"'+(u.canAddEvents===false?' selected':'')+'>No</option></select></div>'+
@@ -1998,7 +1999,7 @@ ACTIONS['user-save']=async (el,d)=>{
   if(!code||!name){ toast('User code and name are required','error'); return; }
   el.disabled=true; el.textContent='Saving…';
   try{
-    const common={by:state.user.code, code, name, role:$('#um-role').value, canAddEvents:$('#um-events').value, canSwitchLive:$('#um-live').value};
+    const common={by:state.user.code, code, name, email:$('#um-email').value.trim(), role:$('#um-role').value, canAddEvents:$('#um-events').value, canSwitchLive:$('#um-live').value};
     if(isNew){
       const pin=$('#um-pin').value.trim();
       if(!pin){ toast('PIN is required for a new user','error'); el.disabled=false; el.textContent='Save User'; return; }
@@ -2064,12 +2065,19 @@ ACTIONS['call-save']=async (el,d)=>{
   if(!result){ toast('Please select a call result','error'); return; }
   el.disabled=true; el.textContent='Saving…';
   try{
-    await api('logCall',{
+    const saved = await api('logCall',{
       user: state.user.code, companyId: d.cid, companyName: d.cname, result,
       followUpDate: $('#cm-fudate').value, clientEventName: $('#cm-evname').value.trim(),
       clientEventDate: $('#cm-evdate').value, notes: $('#cm-notes').value.trim()
     });
-    toast('Call logged','success');
+    const isMeeting = result==='COMPANY PROFILE MEETING SET' || result==='PROJECT BRIEFING MEETING SET';
+    if(isMeeting && saved.meetingAlert && saved.meetingAlert.sent){
+      toast('Meeting logged — manager email alert sent','success');
+    }else if(isMeeting && saved.meetingAlert && saved.meetingAlert.reason){
+      toast('Meeting logged — add manager emails in Users / Settings to send alerts','success');
+    }else{
+      toast('Call logged','success');
+    }
     closeModal();
     state.lastReport=null; state.lastMgrReport=null;
     renderTab(state.tab); // reload whatever list the user is looking at
