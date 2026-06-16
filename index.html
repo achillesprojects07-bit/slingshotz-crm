@@ -2052,26 +2052,29 @@ async function openCallModal(companyId, companyName, historyOnly){
     resultSelect.addEventListener('change', updateDateLabel);
     updateDateLabel();
   }
-try{
-  const data = await api('getCallHistory',{companyId});
-  const box=$('#cm-history'); if(!box) return;
 
-  box.innerHTML = data.history.length ? data.history.map(h=>{
-    const histResult = String(h.result || '').toUpperCase();
-    const histIsMeeting = histResult === 'COMPANY PROFILE MEETING SET' || histResult === 'PROJECT BRIEFING MEETING SET';
-    const dateText = histIsMeeting ? 'Meeting date' : 'Follow-up';
+  try{
+    const data = await api('getCallHistory',{companyId});
+    const box=$('#cm-history'); 
+    if(!box) return;
 
-    return '<div class="hist-item"><div class="top"><span><b>'+esc(h.agent)+'</b> · '+esc(h.timestamp)+'</span>'+resultPill(h.result)+'</div>'+
-      (h.followUpDate?'<div>'+dateText+': <b>'+esc(h.followUpDate)+'</b></div>':'')+
-      (h.clientEventName?'<div>🎪 '+esc(h.clientEventName)+(h.clientEventDate?' ('+esc(h.clientEventDate)+')':'')+'</div>':'')+
-      (h.notes?'<div style="color:var(--muted)">'+esc(h.notes)+'</div>':'')+
-      (state.user && state.user.role==='MANAGER' && String(h.result||'').toUpperCase()==='BIDDING REQUIREMENT' ? '<div style="margin-top:7px"><button class="btn btn-sm btn-primary" data-action="bid-from-call" data-cid="'+esc(h.companyId||companyId)+'" data-cname="'+esc(h.companyName||companyName)+'" data-call="'+esc(h.callId||'')+'">Create Bid from this Call</button></div>' : '')+
-    '</div>';
-  }).join('')
-  : emptyHtml('🆕','No previous calls for this company.');
-}catch(e){
-  const box=$('#cm-history'); 
-  if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>';
+    box.innerHTML = data.history.length ? data.history.map(h=>{
+      const histResult = String(h.result || '').toUpperCase();
+      const histIsMeeting = histResult === 'COMPANY PROFILE MEETING SET' || histResult === 'PROJECT BRIEFING MEETING SET';
+      const dateText = histIsMeeting ? 'Meeting date' : 'Follow-up';
+
+      return '<div class="hist-item"><div class="top"><span><b>'+esc(h.agent)+'</b> · '+esc(h.timestamp)+'</span>'+resultPill(h.result)+'</div>'+
+        (h.followUpDate?'<div>'+dateText+': <b>'+esc(h.followUpDate)+'</b></div>':'')+
+        (h.clientEventName?'<div>🎪 '+esc(h.clientEventName)+(h.clientEventDate?' ('+esc(h.clientEventDate)+')':'')+'</div>':'')+
+        (h.notes?'<div style="color:var(--muted)">'+esc(h.notes)+'</div>':'')+
+        (state.user && state.user.role==='MANAGER' && String(h.result||'').toUpperCase()==='BIDDING REQUIREMENT' ? '<div style="margin-top:7px"><button class="btn btn-sm btn-primary" data-action="bid-from-call" data-cid="'+esc(h.companyId||companyId)+'" data-cname="'+esc(h.companyName||companyName)+'" data-call="'+esc(h.callId||'')+'">Create Bid from this Call</button></div>' : '')+
+      '</div>';
+    }).join('')
+    : emptyHtml('🆕','No previous calls for this company.');
+  }catch(e){
+    const box=$('#cm-history'); 
+    if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>';
+  }
 }
 
 ACTIONS['bid-from-call']=(el,d)=>{
@@ -2084,13 +2087,21 @@ ACTIONS['call-save']=async (el,d)=>{
   const result=$('#cm-result').value;
   if(!result){ toast('Please select a call result','error'); return; }
   el.disabled=true; el.textContent='Saving…';
+
   try{
     const saved = await api('logCall',{
-      user: state.user.code, companyId: d.cid, companyName: d.cname, result,
-      followUpDate: $('#cm-fudate').value, clientEventName: $('#cm-evname').value.trim(),
-      clientEventDate: $('#cm-evdate').value, notes: $('#cm-notes').value.trim()
+      user: state.user.code,
+      companyId: d.cid,
+      companyName: d.cname,
+      result: result,
+      followUpDate: $('#cm-fudate').value,
+      clientEventName: $('#cm-evname').value.trim(),
+      clientEventDate: $('#cm-evdate').value,
+      notes: $('#cm-notes').value.trim()
     });
+
     const isMeeting = result==='COMPANY PROFILE MEETING SET' || result==='PROJECT BRIEFING MEETING SET';
+
     if(isMeeting && saved.meetingAlert && saved.meetingAlert.sent){
       toast('Meeting logged — manager email alert sent','success');
     }else if(isMeeting && saved.meetingAlert && saved.meetingAlert.reason){
@@ -2098,10 +2109,16 @@ ACTIONS['call-save']=async (el,d)=>{
     }else{
       toast('Call logged','success');
     }
+
     closeModal();
-    state.lastReport=null; state.lastMgrReport=null;
-    renderTab(state.tab); // reload whatever list the user is looking at
-  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Call'; }
+    state.lastReport=null;
+    state.lastMgrReport=null;
+    renderTab(state.tab);
+  }catch(e){
+    toast(e.message,'error');
+    el.disabled=false;
+    el.textContent='Save Call';
+  }
 };
 
 /* ===================== COMPANY EDIT MODAL (manager) =================== */
