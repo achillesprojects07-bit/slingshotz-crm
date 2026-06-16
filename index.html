@@ -162,6 +162,25 @@
   .funnel-row{display:flex;align-items:center;justify-content:space-between;border-radius:8px;padding:9px 14px;font-weight:600;font-size:13.5px}
   .funnel-sub{margin-left:24px;border-radius:7px;padding:7px 12px;font-size:12.5px}
 
+  /* ---------- visual dashboard clarity ---------- */
+  .dashboard-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
+  .bar-list{display:flex;flex-direction:column;gap:9px}
+  .bar-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(90px,2fr) 34px;gap:10px;align-items:center;font-size:13px}
+  .bar-label{font-weight:650;color:var(--ink)}
+  .bar-track{height:12px;background:#e2e8f0;border-radius:999px;overflow:hidden}
+  .bar-fill{height:100%;background:var(--brand);border-radius:999px;min-width:0}
+  .bar-value{text-align:right;font-weight:800;color:var(--ink)}
+  .group-block{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px;background:#fff}
+  .group-head{background:#f8fafc;padding:8px 11px;font-weight:800;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line)}
+  .group-row{display:grid;grid-template-columns:minmax(180px,1fr) 44px;gap:8px;padding:7px 11px;border-bottom:1px solid #f1f5f9;align-items:center;font-size:12.5px}
+  .group-row:last-child{border-bottom:0}
+  .group-row b{text-align:right;font-size:14px}
+  .action-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:10px}
+  .action-card{border:1px solid var(--line);border-radius:10px;padding:12px;background:#f8fafc}
+  .action-card b{display:block;font-size:22px;line-height:1}
+  .action-card span{display:block;color:var(--muted);font-weight:650;font-size:12px;margin-top:4px}
+  @media(max-width:640px){.bar-row{grid-template-columns:1fr 1.4fr 30px}.dashboard-grid{grid-template-columns:1fr}}
+
   @media(max-width:640px){
     .cards{grid-template-columns:repeat(2,1fr)}
     .form-grid{grid-template-columns:1fr}
@@ -237,12 +256,14 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 // ⬇⬇⬇ PASTE YOUR APPS SCRIPT WEB APP URL (ends in /exec) HERE ⬇⬇⬇
 const API_URL = 'https://script.google.com/macros/s/AKfycbwov4NPqYNVKUokep_8crBARjgkmV0wizcJoCyxLFs5AT2oERSM2Fo6NqpmW2tvIQNI/exec';
 
-const CALL_RESULTS = [
-  'ASKED TO CALL BACK','BIDDING REQUIREMENT','BUSY / TRY AGAIN','COMPANY PROFILE SENT',
-  'COMPANY PROFILE MEETING SET','CONTACT PERSON NOT AVAILABLE','EVENT IDENTIFIED',
-  'PROJECT BRIEFING MEETING SET','NO ANSWER','NO REQUIREMENT','NOT INTERESTED',
-  'NUMBER UNREACHABLE','WRONG NUMBER'
+const CALL_RESULT_GROUPS = [
+  {label:'No Contact / Try Again', results:['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILABLE']},
+  {label:'Invalid Contact', results:['WRONG NUMBER','NUMBER UNREACHABLE']},
+  {label:'Not a Lead', results:['NO REQUIREMENT','NOT INTERESTED']},
+  {label:'Follow-Up / Nurture', results:['ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED']},
+  {label:'Opportunity', results:['BIDDING REQUIREMENT','COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']}
 ];
+const CALL_RESULTS = CALL_RESULT_GROUPS.flatMap(g=>g.results);
 const MEANINGFUL = new Set(['ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
 const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILABLE']);
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
@@ -259,7 +280,7 @@ const state = {
   users: [],             // for dropdowns
   queue: null,           // Add Targets cache {companies, categories}
   queueFilters: { cat:'', search:'', eventsJoined:'', page:1 },
-  dashCard: 'targets',   // selected agent dashboard card
+  dashCard: 'completedToday',   // selected agent dashboard card
   mgrKpi: 'calls',       // selected manager KPI
   mgrFilters: null,
   perfFilters: null,
@@ -316,6 +337,81 @@ function resultPill(result){
   else if (RETRY.has(result)) cls='pill-retry';
   else if (CLOSED.has(result)) cls='pill-closed';
   return '<span class="pill '+cls+'">'+esc(result||'—')+'</span>';
+}
+
+function callResultOptions(selected){
+  selected = String(selected||'').toUpperCase();
+  return CALL_RESULT_GROUPS.map(g=>
+    '<optgroup label="'+esc(g.label)+'">'+
+    g.results.map(r=>'<option value="'+esc(r)+'"'+(selected===r?' selected':'')+'>'+esc(r)+'</option>').join('')+
+    '</optgroup>'
+  ).join('');
+}
+
+function countByResult(rows){
+  const counts = {};
+  (rows||[]).forEach(r=>{
+    const key = String((r && (r.result || r.callResult || r.CALL_RESULT)) || '').toUpperCase().trim();
+    if(key) counts[key]=(counts[key]||0)+1;
+  });
+  return counts;
+}
+
+function sumResults(counts, names){
+  return names.reduce((total,name)=>total+(Number(counts[name])||0),0);
+}
+
+function productiveBreakdownFromRows(rows){
+  const counts = countByResult(rows);
+  return [
+    {label:'Bids / Proposals Needed', count:sumResults(counts,['BIDDING REQUIREMENT'])},
+    {label:'Meetings Booked', count:sumResults(counts,['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET'])},
+    {label:'Callbacks / Follow-Ups', count:sumResults(counts,['ASKED TO CALL BACK'])},
+    {label:'Profiles Sent', count:sumResults(counts,['COMPANY PROFILE SENT'])},
+    {label:'Events Found', count:sumResults(counts,['EVENT IDENTIFIED'])}
+  ];
+}
+
+function groupedOutcomeData(rows){
+  const counts = countByResult(rows);
+  return CALL_RESULT_GROUPS.map(g=>({
+    label:g.label,
+    rows:g.results.map(r=>({label:r, count:Number(counts[r])||0}))
+  }));
+}
+
+function totalCount(items){ return (items||[]).reduce((n,x)=>n+(Number(x.count)||0),0); }
+
+function barList(items){
+  items = items || [];
+  const max = Math.max(1, ...items.map(x=>Number(x.count)||0));
+  return '<div class="bar-list">'+items.map(x=>{
+    const count = Number(x.count)||0;
+    const pct = Math.max(0, Math.round((count/max)*100));
+    return '<div class="bar-row"><div class="bar-label">'+esc(x.label)+'</div>'+
+      '<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"></div></div>'+
+      '<div class="bar-value">'+count+'</div></div>';
+  }).join('')+'</div>';
+}
+
+function groupedOutcomeHtml(groups){
+  groups = groups || [];
+  return groups.map(g=>'<div class="group-block"><div class="group-head">'+esc(g.label)+'</div>'+
+    g.rows.map(r=>'<div class="group-row"><span>'+esc(r.label)+'</span><b>'+r.count+'</b></div>').join('')+
+    '</div>').join('');
+}
+
+function managerActionSummary(rep, productiveItems, outcomeGroups){
+  const bids = (productiveItems.find(x=>x.label==='Bids / Proposals Needed')||{}).count || 0;
+  const meetings = (productiveItems.find(x=>x.label==='Meetings Booked')||{}).count || 0;
+  const callbacks = (productiveItems.find(x=>x.label==='Callbacks / Follow-Ups')||{}).count || 0;
+  const overdueDue = Number((rep.kpis||{}).followupsDue)||0;
+  return '<div class="action-summary">'+
+    '<div class="action-card"><b>'+bids+'</b><span>Bids / proposals to review first</span></div>'+
+    '<div class="action-card"><b>'+meetings+'</b><span>Meetings booked to prepare for</span></div>'+
+    '<div class="action-card"><b>'+callbacks+'</b><span>Callbacks / follow-ups opened</span></div>'+
+    '<div class="action-card"><b>'+overdueDue+'</b><span>Follow-ups due or overdue</span></div>'+
+  '</div>';
 }
 
 function dueLabel(f){
@@ -652,41 +748,59 @@ function targetTable(rows){
 function renderFunnel(todayCalls, needsActionCount){
   const fRow = (bg,text,count,cls)=>
     '<div class="funnel-row'+(cls?' '+cls:'')+'" style="background:'+bg+';color:#fff"><span>'+text+'</span><b>'+count+'</b></div>';
-  const noContact = todayCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase())).length;
-  const closed    = todayCalls.filter(c=>CLOSED.has(String(c.result||'').toUpperCase())).length;
-  const mFull     = todayCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase()));
-  const subtypes  = {};
-  mFull.forEach(c=>{ const r=String(c.result||'').toUpperCase(); subtypes[r]=(subtypes[r]||0)+1; });
+  todayCalls = todayCalls || [];
+  const counts = countByResult(todayCalls);
+  const noContact = sumResults(counts, Array.from(RETRY));
+  const closed    = sumResults(counts, Array.from(CLOSED));
+  const productive = productiveBreakdownFromRows(todayCalls);
+  const productiveTotal = totalCount(productive);
   const total = todayCalls.length;
   if(!total && !needsActionCount) return '';
-  return '<div class="panel"><div class="section-title"><h2>Today\'s Call Funnel</h2></div>'+
+  return '<div class="panel"><div class="section-title"><h2>My Call Funnel Today</h2></div>'+
     '<div class="funnel-flow">'+
     fRow('#1A3A6B','📞 Calls Made Today',total)+
-    (noContact ? fRow('#6b7280','No Contact — retry later',noContact) : '')+
-    (closed    ? fRow('var(--bad)','Closed / Done',closed) : '')+
-    (mFull.length ? fRow('#1A3A6B','Follow-Up Opened',mFull.length) : '')+
-    Object.entries(subtypes).sort((a,b)=>b[1]-a[1]).map(([r,n])=>fRow('#F59E0B','↳ '+esc(r),n,'funnel-sub')).join('')+
+    (productiveTotal ? fRow('#047857','Productive Calls',productiveTotal) : '')+
+    productive.filter(x=>x.count).map(x=>fRow('#F59E0B','↳ '+esc(x.label),x.count,'funnel-sub')).join('')+
+    (noContact ? fRow('#6b7280','Calls to Retry',noContact) : '')+
+    (closed    ? fRow('var(--bad)','Closed / Not Leads',closed) : '')+
     (needsActionCount ? fRow('#F97316','Retry Cap Reached (total in list)',needsActionCount) : '')+
     '</div></div>';
 }
 
 const DASH_CARDS = [
-  {key:'targets', label:'My Target List'},
-  {key:'followups', label:'My Follow-Ups'},
-  {key:'meetings', label:'My Meetings Set'},
-  {key:'needsAction', label:'Unreached Companies'},
-  {key:'dailyTarget', label:'Daily Target'},
-  {key:'completedToday', label:'Completed Today'},
-  {key:'remainingToday', label:'Remaining Today'}
+  {key:'completedToday', label:'My Calls Today'},
+  {key:'productiveToday', label:'My Productive Calls'},
+  {key:'followups', label:'My Follow-Ups Due'},
+  {key:'retryToday', label:'My Calls to Retry'},
+  {key:'targetProgress', label:'My Target Progress'}
 ];
+
+function agentDashCardValue(card, rep){
+  const todayCalls = rep.todayCalls || [];
+  const counts = countByResult(todayCalls);
+  if(card.key==='completedToday') return (rep.counts.completedToday||0)+' / '+(rep.counts.dailyTarget||0);
+  if(card.key==='productiveToday') return totalCount(productiveBreakdownFromRows(todayCalls));
+  if(card.key==='retryToday') return sumResults(counts, Array.from(RETRY));
+  if(card.key==='targetProgress') return (rep.counts.completedToday||0)+' / '+(rep.counts.dailyTarget||0);
+  return rep.counts[card.key] || 0;
+}
 
 async function renderAgentDashboard(c){
   const rep = await api('getAgentDashboardReport', {user: state.user.code});
   state.lastReport = rep;
+  const productiveItems = productiveBreakdownFromRows(rep.todayCalls||[]);
+  const outcomeGroups = groupedOutcomeData(rep.todayCalls||[]);
   c.innerHTML =
     '<div class="cards">'+DASH_CARDS.map(card=>
       '<div class="stat-card'+(state.dashCard===card.key?' selected':'')+'" data-action="dash-card" data-key="'+card.key+'">'+
-      '<div class="num">'+rep.counts[card.key]+'</div><div class="lbl">'+card.label+'</div></div>').join('')+
+      '<div class="num">'+agentDashCardValue(card, rep)+'</div><div class="lbl">'+card.label+'</div></div>').join('')+
+    '</div>'+
+    '<div class="dashboard-grid">'+
+      '<div class="panel"><div class="section-title"><h2>My Call Results Today</h2></div>'+barList(productiveItems.concat([
+        {label:'Closed / Not Leads', count:sumResults(countByResult(rep.todayCalls||[]), Array.from(CLOSED))},
+        {label:'Calls to Retry', count:sumResults(countByResult(rep.todayCalls||[]), Array.from(RETRY))}
+      ]))+'</div>'+
+      '<div class="panel"><div class="section-title"><h2>My Detailed Outcome Breakdown</h2></div>'+groupedOutcomeHtml(outcomeGroups)+'</div>'+
     '</div>'+
     renderFunnel(rep.todayCalls||[], rep.counts.needsAction||0)+
     '<div class="panel"><div class="section-title"><h2 id="dash-detail-title"></h2></div><div id="dash-detail"></div></div>';
@@ -706,9 +820,11 @@ function renderDashDetail(){
   const key = state.dashCard;
   if (key==='targets'){ title.textContent='My Target List ('+rep.counts.targets+')'; box.innerHTML=targetTable(rep.targets); }
   else if (key==='followups'){ title.textContent='My Follow-Ups ('+rep.counts.followups+')'; box.innerHTML=followupCards(rep.followups); }
-  else if (key==='meetings'){ title.textContent='My Meetings Set ('+rep.counts.meetings+')'; box.innerHTML=followupCards(rep.meetings); }
-  else if (key==='needsAction'){ title.textContent='Unreached Companies ('+rep.counts.needsAction+')'; box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a meaningful result. Review and try again when ready.</p>'+targetTable(rep.needsAction); }
-  else { title.textContent='Calls Completed Today ('+rep.counts.completedToday+' of '+rep.counts.dailyTarget+')'; box.innerHTML=callTable(rep.todayCalls,{hideAgent:true}); }
+  else if (key==='meetings'){ title.textContent='My Meetings Booked ('+rep.counts.meetings+')'; box.innerHTML=followupCards(rep.meetings); }
+  else if (key==='retryToday'){ const retryCalls=(rep.todayCalls||[]).filter(c=>RETRY.has(String(c.result||'').toUpperCase())); title.textContent='My Calls to Retry Today ('+retryCalls.length+')'; box.innerHTML=callTable(retryCalls,{hideAgent:true}); }
+  else if (key==='needsAction'){ title.textContent='Retry Cap Reached ('+rep.counts.needsAction+')'; box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a productive result. Review and try again when ready.</p>'+targetTable(rep.needsAction); }
+  else if (key==='targetProgress'){ title.textContent='My Target Progress ('+(rep.counts.completedToday||0)+' of '+(rep.counts.dailyTarget||0)+')'; box.innerHTML=targetTable(rep.targets||[]); }
+  else { title.textContent=(key==='productiveToday'?'My Productive Calls Today':'Calls Completed Today')+' ('+(rep.todayCalls||[]).length+')'; box.innerHTML=callTable(key==='productiveToday' ? (rep.todayCalls||[]).filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase())) : rep.todayCalls,{hideAgent:true}); }
 }
 
 /* ======================= AGENT: MY TARGET LIST ======================== */
@@ -1193,7 +1309,7 @@ async function renderLeaderboard(c){
   c.innerHTML = '<div class="panel"><div class="section-title"><h2>Leaderboard — This Month</h2>'+
     '<button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+
     (ranked.length ?
-    '<div class="table-wrap"><table><thead><tr><th>#</th><th>Agent</th><th>Calls</th><th>Meaningful</th><th>Conv %</th><th>Meetings</th><th>Bids</th><th>Quality Score</th></tr></thead><tbody>'+
+    '<div class="table-wrap"><table><thead><tr><th>#</th><th>Agent</th><th>Calls</th><th>Productive</th><th>Conv %</th><th>Meetings</th><th>Bids</th><th>Quality Score</th></tr></thead><tbody>'+
     ranked.map((a,i)=>'<tr'+(a.agent===state.user.code?' style="background:var(--brand-soft)"':'')+'>'+
       '<td><b>'+(i+1)+'</b>'+(i===0?' 🏆':'')+'</td>'+
       '<td><b>'+esc(a.agent)+'</b> <small style="color:var(--muted)">'+esc(a.name||'')+'</small></td>'+
@@ -1207,13 +1323,13 @@ async function renderLeaderboard(c){
 
 const MGR_KPIS = [
   {key:'calls', label:'Calls Logged', kpi:'callsLogged'},
-  {key:'meaningful', label:'Meaningful Conversations', kpi:'meaningful'},
-  {key:'bids', label:'Proposal / Bid Opportunities', kpi:'bids'},
-  {key:'followupsDue', label:'Follow-Ups Due', kpi:'followupsDue'},
-  {key:'meetings', label:'Meetings Set', kpi:'meetings'},
-  {key:'profilesSent', label:'Company Profiles Sent', kpi:'profilesSent'},
-  {key:'eventsFound', label:'Client Events Found', kpi:'eventsFound'},
-  {key:'retryCases', label:'Retry / Research Cases', kpi:'retryCases'}
+  {key:'meaningful', label:'Productive Calls', kpi:'meaningful'},
+  {key:'bids', label:'Bids / Proposals Needed', kpi:'bids'},
+  {key:'followupsDue', label:'Callbacks / Follow-Ups', kpi:'followupsDue'},
+  {key:'meetings', label:'Meetings Booked', kpi:'meetings'},
+  {key:'profilesSent', label:'Profiles Sent', kpi:'profilesSent'},
+  {key:'eventsFound', label:'Events Found', kpi:'eventsFound'},
+  {key:'retryCases', label:'Calls to Retry', kpi:'retryCases'}
 ];
 
 
@@ -1279,21 +1395,40 @@ async function loadCommandCenter(){
   try{
     const rep = await api('getManagerDashboardReport', {fromDate:f.from, toDate:f.to, agent:f.agent});
     state.lastMgrReport = rep;
+    const allCalls = (rep.lists && rep.lists.calls) ? rep.lists.calls : [];
+    const resultCounts = countByResult(allCalls);
+    const productiveItems = productiveBreakdownFromRows(allCalls);
+    const outcomeGroups = groupedOutcomeData(allCalls);
+    const retryTotal = sumResults(resultCounts, Array.from(RETRY));
+    const closedTotal = sumResults(resultCounts, ['NO REQUIREMENT','NOT INTERESTED']);
+    const invalidTotal = sumResults(resultCounts, ['WRONG NUMBER','NUMBER UNREACHABLE']);
+    const topCards = [
+      {key:'calls', label:'Calls Logged', value:rep.kpis.callsLogged||0},
+      {key:'meaningful', label:'Productive Calls', value:totalCount(productiveItems)},
+      {key:'attention', label:'Needs Manager Action', value:(rep.attention||[]).length},
+      {key:'closed', label:'Closed / Not Leads', value:closedTotal},
+      {key:'retryCases', label:'Calls to Retry', value:retryTotal},
+      {key:'invalid', label:'Invalid Contacts', value:invalidTotal}
+    ];
     body.innerHTML =
-      '<div class="cards">'+MGR_KPIS.map(k=>
+      '<div class="cards">'+topCards.map(k=>
         '<div class="stat-card'+(state.mgrKpi===k.key?' selected':'')+'" data-action="cc-kpi" data-key="'+k.key+'">'+
-        '<div class="num">'+rep.kpis[k.kpi]+'</div><div class="lbl">'+k.label+'</div></div>').join('')+'</div>'+
-      '<div class="panel"><h2>Insights</h2><ul class="insights">'+rep.insights.map(i=>'<li>'+esc(i)+'</li>').join('')+'</ul></div>'+
+        '<div class="num">'+k.value+'</div><div class="lbl">'+k.label+'</div></div>').join('')+'</div>'+
+      '<div class="dashboard-grid">'+
+        '<div class="panel"><div class="section-title"><h2>Productive Call Breakdown</h2><small style="color:var(--muted)">This explains the Productive Calls number.</small></div>'+barList(productiveItems)+'</div>'+
+        '<div class="panel"><div class="section-title"><h2>Manager Action Summary</h2></div>'+managerActionSummary(rep, productiveItems, outcomeGroups)+'</div>'+
+      '</div>'+
+      '<div class="panel"><div class="section-title"><h2>Call Outcome Breakdown</h2><small style="color:var(--muted)">Grouped the same way agents log call results.</small></div>'+groupedOutcomeHtml(outcomeGroups)+'</div>'+
+      '<div class="panel"><h2>Today’s Summary</h2><ul class="insights">'+rep.insights.map(i=>'<li>'+esc(String(i).replace(/Meaningful conversations/gi,'Productive calls').replace(/meaningful conversations/gi,'productive calls'))+'</li>').join('')+'</ul></div>'+
       '<div class="panel"><div class="section-title"><h2 id="cc-drill-title"></h2></div><div id="cc-drill"></div></div>'+
-      '<div class="panel"><h2>Needs Manager Attention ('+rep.attention.length+')</h2><div id="cc-attn">'+attentionList(rep.attention)+'</div></div>'+
-      '<div class="panel"><h2>Agent Activity Snapshot</h2>'+snapshotTable(rep.snapshot)+'</div>';
+      '<div class="panel"><h2>Needs Manager Attention ('+(rep.attention||[]).length+')</h2><div id="cc-attn">'+attentionList(rep.attention||[])+'</div></div>'+
+      '<div class="panel"><h2>Agent Activity Snapshot</h2>'+snapshotTable(rep.snapshot||[])+'</div>';
     renderMgrDrill();
   }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
 ACTIONS['cc-kpi']=(el,d)=>{
   state.mgrKpi=d.key;
-  if(d.key==='bids'){ renderTab('bids'); return; }
   document.querySelectorAll('#cc-body .stat-card').forEach(x=>x.classList.toggle('selected', x.dataset.key===d.key));
   renderMgrDrill();
 };
@@ -1301,10 +1436,22 @@ ACTIONS['cc-kpi']=(el,d)=>{
 function renderMgrDrill(){
   const rep=state.lastMgrReport; if(!rep) return;
   const box=$('#cc-drill'), title=$('#cc-drill-title'); if(!box) return;
-  const k = MGR_KPIS.find(x=>x.key===state.mgrKpi) || MGR_KPIS[0];
-  const rows = rep.lists[k.key] || [];
-  title.textContent = k.label + ' (' + rows.length + ')';
-  box.innerHTML = (k.key==='followupsDue') ? followupCards(rows) : callTable(rows);
+  const allCalls = (rep.lists && rep.lists.calls) ? rep.lists.calls : [];
+  const key = state.mgrKpi || 'calls';
+  const labelMap = {calls:'Calls Logged', meaningful:'Productive Calls', attention:'Needs Manager Action', closed:'Closed / Not Leads', retryCases:'Calls to Retry', invalid:'Invalid Contacts'};
+  let rows = [];
+  if(key==='attention'){ title.textContent='Needs Manager Action ('+(rep.attention||[]).length+')'; box.innerHTML=attentionList(rep.attention||[]); return; }
+  if(key==='meaningful') rows = allCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase()));
+  else if(key==='closed') rows = allCalls.filter(c=>['NO REQUIREMENT','NOT INTERESTED'].includes(String(c.result||'').toUpperCase()));
+  else if(key==='invalid') rows = allCalls.filter(c=>['WRONG NUMBER','NUMBER UNREACHABLE'].includes(String(c.result||'').toUpperCase()));
+  else if(key==='retryCases') rows = allCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase()));
+  else {
+    const k = MGR_KPIS.find(x=>x.key===key);
+    rows = (rep.lists && k) ? (rep.lists[k.key] || []) : allCalls;
+  }
+  const label = labelMap[key] || ((MGR_KPIS.find(x=>x.key===key)||{}).label || 'Calls Logged');
+  title.textContent = label + ' (' + rows.length + ')';
+  box.innerHTML = (key==='followupsDue') ? followupCards(rows) : callTable(rows);
 }
 
 function attentionList(items){
@@ -1320,7 +1467,7 @@ function attentionList(items){
 
 function snapshotTable(stats){
   if(!stats.length) return emptyHtml('📊','No agent activity in this range.');
-  return '<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Calls</th><th>Meaningful</th><th>Conv %</th><th>Follow-ups</th><th>Meetings</th><th>Bids</th><th>Profiles Sent</th><th>Retry</th><th>Last Activity</th></tr></thead><tbody>'+
+  return '<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Calls</th><th>Productive</th><th>Conv %</th><th>Follow-ups</th><th>Meetings</th><th>Bids</th><th>Profiles Sent</th><th>Retry</th><th>Last Activity</th></tr></thead><tbody>'+
     stats.map(s=>'<tr><td><b>'+esc(s.agent)+'</b></td><td>'+s.calls+'</td><td>'+s.meaningful+'</td><td>'+s.conversion+'%</td>'+
     '<td>'+s.followups+'</td><td>'+s.meetings+'</td><td>'+s.bids+'</td><td>'+s.profilesSent+'</td><td>'+s.retryCases+'</td>'+
     '<td class="nowrap">'+esc(s.lastActivity||'—')+'</td></tr>').join('')+'</tbody></table></div>';
@@ -1481,7 +1628,7 @@ async function renderPerformance(c){
     const data = await api('getAgentPerformanceReport',{fromDate:f.from,toDate:f.to,agent:f.agent});
     $('#pf-body').innerHTML='<div class="panel"><h2>Agent Performance</h2>'+
       (data.agents.length ?
-      '<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Calls</th><th>Meaningful</th><th>Conv %</th><th>Follow-ups Created</th><th>Meetings</th><th>Bids</th><th>Profiles Sent</th><th>Retry Cases</th><th>Quality Score</th><th>Last Activity</th></tr></thead><tbody>'+
+      '<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Calls</th><th>Productive</th><th>Conv %</th><th>Follow-ups Created</th><th>Meetings</th><th>Bids</th><th>Profiles Sent</th><th>Retry Cases</th><th>Quality Score</th><th>Last Activity</th></tr></thead><tbody>'+
       data.agents.map(a=>'<tr>'+
         '<td><b>'+esc(a.agent)+'</b><br><small style="color:var(--muted)">'+esc(a.name||'')+'</small></td>'+
         '<td>'+a.calls+'</td><td>'+a.meaningful+'</td><td>'+a.conversion+'%</td><td>'+a.followups+'</td>'+
@@ -1740,7 +1887,7 @@ async function openCallModal(companyId, companyName, historyOnly){
     (historyOnly?'':
       '<div class="form-grid">'+
         '<div class="full"><label>Call Result *</label><select id="cm-result"><option value="">Select result…</option>'+
-          CALL_RESULTS.map(r=>'<option>'+r+'</option>').join('')+'</select></div>'+
+          callResultOptions()+'</select></div>'+
         '<div><label>Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+
         '<div><label>Client Event Date</label><input type="date" id="cm-evdate"></div>'+
         '<div class="full"><label>Client Event Name</label><input id="cm-evname" placeholder="e.g. Product launch, trade show booth…"></div>'+
