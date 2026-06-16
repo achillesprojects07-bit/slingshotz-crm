@@ -179,7 +179,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue</div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b>B3.2 DASHBOARD FIX</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -199,6 +199,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
+      <span class="badge badge-demo" id="app-build-tag">B3.2 DASHBOARD FIX</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -244,9 +245,10 @@ const CALL_RESULTS = [
   'NUMBER UNREACHABLE','WRONG NUMBER'
 ];
 const MEANINGFUL = new Set(['ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
-const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILABLE']);
+const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN']);
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
-const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED','NUMBER UNREACHABLE','WRONG NUMBER']);
+const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
+const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -259,8 +261,9 @@ const state = {
   users: [],             // for dropdowns
   queue: null,           // Add Targets cache {companies, categories}
   queueFilters: { cat:'', search:'', eventsJoined:'', page:1 },
-  dashCard: 'targets',   // selected agent dashboard card
+  dashCard: 'completedToday',   // selected agent dashboard card
   mgrKpi: 'calls',       // selected manager KPI
+  dashFilters: null,
   mgrFilters: null,
   perfFilters: null,
   trailFilters: null,
@@ -649,49 +652,152 @@ function targetTable(rows){
 
 /* ========================= AGENT: DASHBOARD =========================== */
 
+function safeNum(v){ v=Number(v||0); return isNaN(v)?0:v; }
+function countResultRows(rows, set){ return (rows||[]).filter(c=>set.has(String(c.result||'').toUpperCase().trim())).length; }
+function countMeaningfulRows(rows){ return (rows||[]).filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase().trim())).length; }
+function countByResultLocal(rows){ const o={}; (rows||[]).forEach(c=>{ const r=String(c.result||'').toUpperCase().trim(); if(r) o[r]=(o[r]||0)+1; }); return o; }
+function sumSetCounts(counts,set){ let n=0; set.forEach(r=>{ n+=safeNum(counts[r]); }); return n; }
+
 function renderFunnel(todayCalls, needsActionCount){
   const fRow = (bg,text,count,cls)=>
     '<div class="funnel-row'+(cls?' '+cls:'')+'" style="background:'+bg+';color:#fff"><span>'+text+'</span><b>'+count+'</b></div>';
-  const noContact = todayCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase())).length;
-  const closed    = todayCalls.filter(c=>CLOSED.has(String(c.result||'').toUpperCase())).length;
-  const mFull     = todayCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase()));
-  const subtypes  = {};
-  mFull.forEach(c=>{ const r=String(c.result||'').toUpperCase(); subtypes[r]=(subtypes[r]||0)+1; });
+  todayCalls = todayCalls || [];
+  const counts = countByResultLocal(todayCalls);
+  const retry = sumSetCounts(counts, RETRY);
+  const closed = sumSetCounts(counts, CLOSED);
+  const review = sumSetCounts(counts, REVIEW_DETAILS);
+  const meetings = sumSetCounts(counts, MEETING);
+  const followups = sumSetCounts(counts, new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']));
+  const productive = countMeaningfulRows(todayCalls);
   const total = todayCalls.length;
   if(!total && !needsActionCount) return '';
-  return '<div class="panel"><div class="section-title"><h2>Today\'s Call Funnel</h2></div>'+
+  return '<div class="panel"><div class="section-title"><h2>Today\'s Call Funnel</h2></div>'+ 
     '<div class="funnel-flow">'+
     fRow('#1A3A6B','📞 Calls Made Today',total)+
-    (noContact ? fRow('#6b7280','No Contact — retry later',noContact) : '')+
-    (closed    ? fRow('var(--bad)','Closed / Done',closed) : '')+
-    (mFull.length ? fRow('#1A3A6B','Follow-Up Opened',mFull.length) : '')+
-    Object.entries(subtypes).sort((a,b)=>b[1]-a[1]).map(([r,n])=>fRow('#F59E0B','↳ '+esc(r),n,'funnel-sub')).join('')+
-    (needsActionCount ? fRow('#F97316','Retry Cap Reached (total in list)',needsActionCount) : '')+
+    (productive ? fRow('#047857','Productive Calls',productive) : '')+
+    (followups ? fRow('#F59E0B','Follow-Ups Due / Opened',followups) : '')+
+    (meetings ? fRow('#6D28D9','Meetings Booked',meetings) : '')+
+    (retry ? fRow('#64748B','Calls to Retry',retry) : '')+
+    (review ? fRow('#B45309','Review Company Details',review) : '')+
+    (closed ? fRow('var(--bad)','Closed / Not Leads',closed) : '')+
+    (needsActionCount ? fRow('#F97316','Retry Cap Reached',needsActionCount) : '')+
     '</div></div>';
 }
 
 const DASH_CARDS = [
-  {key:'targets', label:'My Target List'},
-  {key:'followups', label:'My Follow-Ups'},
-  {key:'meetings', label:'My Meetings Set'},
-  {key:'needsAction', label:'Unreached Companies'},
-  {key:'dailyTarget', label:'Daily Target'},
-  {key:'completedToday', label:'Completed Today'},
-  {key:'remainingToday', label:'Remaining Today'}
+  {key:'completedToday', label:'My Calls Today'},
+  {key:'productiveToday', label:'My Productive Calls'},
+  {key:'followups', label:'My Follow-Ups Due'},
+  {key:'meetings', label:'My Meetings Booked'},
+  {key:'retryToday', label:'My Calls to Retry'},
+  {key:'reviewDetails', label:'Review Company Details'},
+  {key:'targetProgress', label:'My Target Progress'}
 ];
 
+function isTodayRange(f){ return f && f.from===todayStr() && f.to===todayStr(); }
+function rangeLabel(f){
+  const today=todayStr(), yesterday=addDays(-1);
+  if(!f) return 'Today';
+  if(f.from===today && f.to===today) return 'Today';
+  if(f.from===yesterday && f.to===yesterday) return 'Yesterday';
+  if(f.from===addDays(-6) && f.to===today) return 'Last 7 Days';
+  if(f.from===monthStart() && f.to===today) return 'This Month';
+  return (f.from||'Start')+' to '+(f.to||'Today');
+}
+function dashboardDateBar(f, idPrefix, applyAction, title){
+  title = title || 'Dashboard Date Filter';
+  return '<div class="section-title"><h2>'+esc(title)+'</h2><small style="color:var(--muted);font-weight:700">Viewing: '+esc(rangeLabel(f))+'</small></div>'+ 
+    '<div class="quick-ranges">'+
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="today">Today</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="yesterday">Yesterday</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="7">Last 7 Days</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="month">This Month</button>'+ 
+    '</div>'+ 
+    '<div class="filter-bar">'+
+      '<div class="field"><label>From Date</label><input type="date" id="'+idPrefix+'-from" value="'+esc(f.from)+'"></div>'+ 
+      '<div class="field"><label>To Date</label><input type="date" id="'+idPrefix+'-to" value="'+esc(f.to)+'"></div>'+ 
+      '<button class="btn btn-primary" data-action="'+applyAction+'">Apply Custom Range</button>'+ 
+    '</div>';
+}
+function setDashboardQuickRange(f,q){
+  if(q==='today'){ f.from=todayStr(); f.to=todayStr(); }
+  else if(q==='yesterday'){ f.from=addDays(-1); f.to=addDays(-1); }
+  else if(q==='7'){ f.from=addDays(-6); f.to=todayStr(); }
+  else if(q==='month'){ f.from=monthStart(); f.to=todayStr(); }
+}
+function callRowsFromActivity(entries){
+  return (entries||[]).filter(en=>String(en.type||'').toUpperCase()==='CALL LOGGED').map(en=>{
+    const details = String(en.details||'');
+    const parts = details.split('|').map(x=>x.trim());
+    const result = parts[0] || '';
+    const fm = details.match(/follow-up\s+([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+    return {timestamp:en.timestamp||'', agent:en.agent||state.user.code, companyId:en.companyId||'', companyName:en.company||'', result, followUpDate:fm?fm[1]:'', clientEventName:'', clientEventDate:'', notes:details};
+  });
+}
+async function agentDashboardCallsForRange(rep, f){
+  if(isTodayRange(f)) return rep.todayCalls || [];
+  const data = await api('getMyActivity', {fromDate:f.from, toDate:f.to, type:'calls'});
+  return callRowsFromActivity(data.entries || []);
+}
+function dashRangeWord(){ return isTodayRange(state.dashFilters) ? 'Today' : 'in Range'; }
+function agentDashLabel(card){
+  if(card.key==='completedToday') return isTodayRange(state.dashFilters) ? 'My Calls Today' : 'My Calls in Range';
+  if(card.key==='productiveToday') return isTodayRange(state.dashFilters) ? 'My Productive Calls Today' : 'My Productive Calls in Range';
+  if(card.key==='retryToday') return isTodayRange(state.dashFilters) ? 'My Calls to Retry Today' : 'My Calls to Retry in Range';
+  if(card.key==='targetProgress') return 'My Target Progress Today';
+  return card.label;
+}
+function agentDashCardValue(card, rep, rangeCalls){
+  const counts = rep.counts || {};
+  rangeCalls = rangeCalls || rep.todayCalls || [];
+  if(card.key==='completedToday') return isTodayRange(state.dashFilters) ? rangeCalls.length+' / '+safeNum(counts.dailyTarget) : rangeCalls.length;
+  if(card.key==='productiveToday') return countMeaningfulRows(rangeCalls);
+  if(card.key==='retryToday') return countResultRows(rangeCalls, RETRY);
+  if(card.key==='meetings') return safeNum(counts.meetings);
+  if(card.key==='reviewDetails') return safeNum(counts.reviewDetails);
+  if(card.key==='targetProgress') return safeNum(counts.completedToday)+' / '+safeNum(counts.dailyTarget);
+  return safeNum(counts[card.key]);
+}
+function productiveBarItems(rows){
+  const counts=countByResultLocal(rows||[]);
+  return [
+    {label:'Bids / Proposals Needed', count:safeNum(counts['BIDDING REQUIREMENT'])},
+    {label:'Meetings Booked', count:sumSetCounts(counts, MEETING)},
+    {label:'Callbacks / Follow-Ups', count:sumSetCounts(counts, new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED']))},
+    {label:'Profiles Sent', count:safeNum(counts['COMPANY PROFILE SENT'])},
+    {label:'Events Found', count:safeNum(counts['EVENT IDENTIFIED'])},
+    {label:'Review Company Details', count:sumSetCounts(counts, REVIEW_DETAILS)},
+    {label:'Calls to Retry', count:sumSetCounts(counts, RETRY)},
+    {label:'Closed / Not Leads', count:sumSetCounts(counts, CLOSED)}
+  ];
+}
+
 async function renderAgentDashboard(c){
+  if(!state.dashFilters) state.dashFilters={from:todayStr(), to:todayStr()};
+  c.innerHTML = '<div class="panel">'+dashboardDateBar(state.dashFilters,'ad','ad-apply','Dashboard Date Filter')+'</div>'+loadingHtml('Loading dashboard…');
   const rep = await api('getAgentDashboardReport', {user: state.user.code});
+  const rangeCalls = await agentDashboardCallsForRange(rep, state.dashFilters);
   state.lastReport = rep;
+  state.lastRangeCalls = rangeCalls;
+  const titleRange = isTodayRange(state.dashFilters) ? 'Today' : '— '+rangeLabel(state.dashFilters);
   c.innerHTML =
+    '<div class="panel">'+dashboardDateBar(state.dashFilters,'ad','ad-apply','Dashboard Date Filter')+'</div>'+ 
     '<div class="cards">'+DASH_CARDS.map(card=>
       '<div class="stat-card'+(state.dashCard===card.key?' selected':'')+'" data-action="dash-card" data-key="'+card.key+'">'+
-      '<div class="num">'+rep.counts[card.key]+'</div><div class="lbl">'+card.label+'</div></div>').join('')+
-    '</div>'+
-    renderFunnel(rep.todayCalls||[], rep.counts.needsAction||0)+
+      '<div class="num">'+agentDashCardValue(card, rep, rangeCalls)+'</div><div class="lbl">'+agentDashLabel(card)+'</div></div>').join('')+
+    '</div>'+ 
+    '<div class="panel"><div class="section-title"><h2>My Call Results '+titleRange+'</h2></div>'+barList(productiveBarItems(rangeCalls))+'</div>'+ 
+    renderFunnel(rangeCalls, rep.counts.needsAction||0)+
     '<div class="panel"><div class="section-title"><h2 id="dash-detail-title"></h2></div><div id="dash-detail"></div></div>';
   renderDashDetail();
 }
+
+ACTIONS['ad-apply']=()=>{
+  const f=state.dashFilters;
+  f.from=$('#ad-from').value; f.to=$('#ad-to').value;
+  renderAgentDashboard($('#tab-content'));
+};
+ACTIONS['ad-apply-quick']=(el,d)=>{ setDashboardQuickRange(state.dashFilters,d.q); renderAgentDashboard($('#tab-content')); };
 
 ACTIONS['dash-card'] = (el,d)=>{
   state.dashCard = d.key;
@@ -701,14 +807,34 @@ ACTIONS['dash-card'] = (el,d)=>{
 
 function renderDashDetail(){
   const rep = state.lastReport; if(!rep) return;
+  const rangeCalls = state.lastRangeCalls || rep.todayCalls || [];
   const box=$('#dash-detail'), title=$('#dash-detail-title');
   if(!box) return;
   const key = state.dashCard;
-  if (key==='targets'){ title.textContent='My Target List ('+rep.counts.targets+')'; box.innerHTML=targetTable(rep.targets); }
-  else if (key==='followups'){ title.textContent='My Follow-Ups ('+rep.counts.followups+')'; box.innerHTML=followupCards(rep.followups); }
-  else if (key==='meetings'){ title.textContent='My Meetings Set ('+rep.counts.meetings+')'; box.innerHTML=followupCards(rep.meetings); }
-  else if (key==='needsAction'){ title.textContent='Unreached Companies ('+rep.counts.needsAction+')'; box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a meaningful result. Review and try again when ready.</p>'+targetTable(rep.needsAction); }
-  else { title.textContent='Calls Completed Today ('+rep.counts.completedToday+' of '+rep.counts.dailyTarget+')'; box.innerHTML=callTable(rep.todayCalls,{hideAgent:true}); }
+  if (key==='followups'){
+    title.textContent='My Follow-Ups Due ('+safeNum(rep.counts.followups)+')';
+    box.innerHTML=followupCards(rep.followups||[]);
+  } else if (key==='meetings'){
+    title.textContent='My Meetings Booked ('+safeNum(rep.counts.meetings)+')';
+    box.innerHTML=followupCards(rep.meetings||[]);
+  } else if (key==='reviewDetails'){
+    title.textContent='Review Company Details ('+safeNum(rep.counts.reviewDetails)+')';
+    box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">Wrong number or unreachable number. Check phone, mobile, contact person, or alternate contact before calling again.</p>'+callTable(rep.reviewDetails||[],{hideAgent:true});
+  } else if (key==='retryToday'){
+    const retryRows=rangeCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase().trim()));
+    title.textContent='My Calls to Retry — '+rangeLabel(state.dashFilters)+' ('+retryRows.length+')';
+    box.innerHTML=callTable(retryRows,{hideAgent:true});
+  } else if (key==='targets' || key==='targetProgress'){
+    title.textContent='My Target List ('+safeNum(rep.counts.targets)+')';
+    box.innerHTML=targetTable(rep.targets||[]);
+  } else if (key==='productiveToday'){
+    const productiveRows=rangeCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase().trim()));
+    title.textContent='My Productive Calls — '+rangeLabel(state.dashFilters)+' ('+productiveRows.length+')';
+    box.innerHTML=callTable(productiveRows,{hideAgent:true});
+  } else {
+    title.textContent='My Calls — '+rangeLabel(state.dashFilters)+' ('+rangeCalls.length+')';
+    box.innerHTML=callTable(rangeCalls,{hideAgent:true});
+  }
 }
 
 /* ======================= AGENT: MY TARGET LIST ======================== */
@@ -1235,6 +1361,7 @@ function agentOptions(selected){
 function dateAgentBar(f, idPrefix, applyAction){
   return '<div class="quick-ranges">'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="today">Today</button>'+
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="yesterday">Yesterday</button>'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="7">Last 7 Days</button>'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="30">Last 30 Days</button>'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="month">This Month</button>'+
@@ -1256,6 +1383,7 @@ function readBar(idPrefix, f){
 
 function quickRange(f, q){
   if(q==='today'){ f.from=todayStr(); f.to=todayStr(); }
+  else if(q==='yesterday'){ f.from=addDays(-1); f.to=addDays(-1); }
   else if(q==='7'){ f.from=addDays(-6); f.to=todayStr(); }
   else if(q==='30'){ f.from=addDays(-29); f.to=todayStr(); }
   else if(q==='month'){ f.from=monthStart(); f.to=todayStr(); }
@@ -1264,9 +1392,9 @@ function quickRange(f, q){
 
 async function renderCommandCenter(c){
   await ensureUsers();
-  if(!state.mgrFilters) state.mgrFilters={from:addDays(-6), to:todayStr(), agent:'ALL'};
+  if(!state.mgrFilters) state.mgrFilters={from:todayStr(), to:todayStr(), agent:'ALL'};
   const f=state.mgrFilters;
-  c.innerHTML='<div class="panel">'+dateAgentBar(f,'cc','cc-apply')+'</div><div id="cc-body">'+loadingHtml('Loading command center…')+'</div>';
+  c.innerHTML='<div class="panel"><div class="section-title"><h2>Manager Dashboard Date Filter</h2><small style="color:var(--muted);font-weight:700">Viewing: '+esc(rangeLabel(f))+'</small></div>'+dateAgentBar(f,'cc','cc-apply')+'</div><div id="cc-body">'+loadingHtml('Loading manager dashboard…')+'</div>';
   await loadCommandCenter();
 }
 
