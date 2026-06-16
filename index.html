@@ -248,6 +248,8 @@ const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILA
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED','NUMBER UNREACHABLE','WRONG NUMBER']);
 const PAGE_SIZE = 50;
+const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
+const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
 const state = {
   user: null,            // {code,name,role,canAddEvents,canSwitchLive}
@@ -262,6 +264,7 @@ const state = {
   mgrFilters: null,
   perfFilters: null,
   trailFilters: null,
+  bidFilters: null,
   eventFilters: { search:'', category:'', venue:'', range:'all' },
   lastReport: null,      // agent dashboard report cache
   lastMgrReport: null
@@ -512,7 +515,7 @@ async function doLogin(){
 }
 
 function logout(){
-  state.user=null; state.pin=null; state.queue=null; state.lastReport=null; state.lastMgrReport=null;
+  state.user=null; state.pin=null; state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null;
   $('#app-view').style.display='none';
   $('#login-view').style.display='flex';
 }
@@ -533,6 +536,7 @@ const MANAGER_TABS = [
   {id:'command', label:'Command Center', render: renderCommandCenter},
   {id:'performance', label:'Agent Performance', render: renderPerformance},
   {id:'worktrail', label:'Work Trail', render: renderWorkTrail},
+  {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
   {id:'events', label:'Events Leads', render: renderEvents},
   {id:'edithistory', label:'Company Edit History', render: renderEditHistory},
   {id:'users', label:'Users / Settings', render: renderUsers}
@@ -565,7 +569,7 @@ $('#mode-switch').addEventListener('click', async ()=>{
   if (next==='LIVE' && !confirm('Switch to LIVE mode?\n\nAll calls, targets and events will be written to the LIVE operational sheets.')) return;
   const prev = state.mode;
   state.mode = next;
-  state.queue=null; state.lastReport=null; state.lastMgrReport=null;
+  state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null;
   updateModeBadge();
   toast('Now in '+next+' mode');
   renderTab(state.tab);
@@ -738,7 +742,10 @@ async function renderAddTargets(c){
   c.innerHTML =
     '<div class="panel">'+
     '<div class="section-title"><h2>Company Database ('+q.count+' companies)</h2>'+
-    '<button class="btn btn-sm" data-action="queue-refresh">Reload Database</button></div>'+
+    '<div style="display:flex;gap:8px;">'+
+    '<button class="btn btn-primary btn-sm" data-action="company-new">+ Add Company</button>'+
+    '<button class="btn btn-sm" data-action="queue-refresh">Reload Database</button>'+
+    '</div></div>'+
     '<div class="filter-bar">'+
       '<div class="field"><label>Category</label><select id="q-cat"><option value="">All categories</option>'+
         q.categories.map(cat=>'<option'+(f.cat===cat?' selected':'')+'>'+esc(cat)+'</option>').join('')+'</select></div>'+
@@ -1209,6 +1216,17 @@ const MGR_KPIS = [
   {key:'retryCases', label:'Retry / Research Cases', kpi:'retryCases'}
 ];
 
+
+async function ensureUsers(){
+  if(state.users && state.users.length) return state.users;
+  if(!state.user || state.user.role!=='MANAGER') return state.users || [];
+  try{
+    const data = await api('getUsers',{});
+    state.users = data.users || [];
+  }catch(e){ /* keep filters usable even if users cannot load */ }
+  return state.users || [];
+}
+
 function agentOptions(selected){
   const agents = state.users.filter(u=>u.active);
   return '<option value="ALL">All agents</option>'+agents.map(u=>'<option value="'+esc(u.code)+'"'+(selected===u.code?' selected':'')+'>'+esc(u.code)+' — '+esc(u.name)+'</option>').join('');
@@ -1245,6 +1263,7 @@ function quickRange(f, q){
 }
 
 async function renderCommandCenter(c){
+  await ensureUsers();
   if(!state.mgrFilters) state.mgrFilters={from:addDays(-6), to:todayStr(), agent:'ALL'};
   const f=state.mgrFilters;
   c.innerHTML='<div class="panel">'+dateAgentBar(f,'cc','cc-apply')+'</div><div id="cc-body">'+loadingHtml('Loading command center…')+'</div>';
@@ -1274,6 +1293,7 @@ async function loadCommandCenter(){
 
 ACTIONS['cc-kpi']=(el,d)=>{
   state.mgrKpi=d.key;
+  if(d.key==='bids'){ renderTab('bids'); return; }
   document.querySelectorAll('#cc-body .stat-card').forEach(x=>x.classList.toggle('selected', x.dataset.key===d.key));
   renderMgrDrill();
 };
@@ -1306,9 +1326,154 @@ function snapshotTable(stats){
     '<td class="nowrap">'+esc(s.lastActivity||'—')+'</td></tr>').join('')+'</tbody></table></div>';
 }
 
+
+/* ======================== MANAGER: BID PIPELINE ======================= */
+
+function pesoFmt(v){
+  const n = Number(String(v||'').replace(/[^0-9.]/g,'')) || 0;
+  return n ? '₱'+n.toLocaleString() : '—';
+}
+
+function bidStagePill(stage){
+  stage = String(stage||'').toUpperCase();
+  let cls = 'pill-neutral';
+  if(stage==='AWARDED') cls='pill-good';
+  else if(stage==='LOST' || stage==='NO DECISION') cls='pill-closed';
+  else if(stage==='SUBMITTED') cls='pill-meet';
+  else if(stage==='PROPOSAL PREP' || stage==='QUALIFYING') cls='pill-retry';
+  return '<span class="pill '+cls+'">'+esc(stage||'—')+'</span>';
+}
+
+function bidStageOptions(selected, includeAll){
+  const head = includeAll ? '<option value="ALL">All stages</option>' : '';
+  return head + BID_STAGES.map(s=>'<option value="'+esc(s)+'"'+(selected===s?' selected':'')+'>'+esc(s)+'</option>').join('');
+}
+
+async function renderBidPipeline(c){
+  await ensureUsers();
+  if(!state.bidFilters) state.bidFilters={from:'', to:'', agent:'ALL', stage:'ALL'};
+  const f=state.bidFilters;
+  c.innerHTML='<div class="panel"><div class="quick-ranges">'+
+      '<button class="chip" data-action="bid-quick" data-q="today">Today</button>'+
+      '<button class="chip" data-action="bid-quick" data-q="7">Last 7 Days</button>'+
+      '<button class="chip" data-action="bid-quick" data-q="30">Last 30 Days</button>'+
+      '<button class="chip" data-action="bid-quick" data-q="month">This Month</button>'+
+      '<button class="chip" data-action="bid-quick" data-q="all">All</button>'+
+    '</div><div class="filter-bar">'+
+      '<div class="field"><label>From Date</label><input type="date" id="bid-from" value="'+esc(f.from)+'"></div>'+
+      '<div class="field"><label>To Date</label><input type="date" id="bid-to" value="'+esc(f.to)+'"></div>'+
+      '<div class="field"><label>Agent</label><select id="bid-agent">'+agentOptions(f.agent)+'</select></div>'+
+      '<div class="field"><label>Stage</label><select id="bid-stage">'+bidStageOptions(f.stage,true)+'</select></div>'+
+      '<button class="btn btn-primary" data-action="bid-apply">Apply / Refresh</button>'+
+      '<button class="btn" data-action="bid-new">+ Add Bid</button>'+
+    '</div></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
+  await loadBidPipeline();
+}
+
+async function loadBidPipeline(){
+  const f=state.bidFilters;
+  const body=$('#bid-body'); if(!body) return;
+  try{
+    const params={fromDate:f.from,toDate:f.to,agent:f.agent,stage:f.stage};
+    if(params.agent==='ALL') params.agent='';
+    if(params.stage==='ALL') params.stage='';
+    const summary = await api('getBidSummary',{});
+    const data = await api('getBidPipeline',params);
+    const byStage = summary.byStage || {};
+    body.innerHTML =
+      '<div class="cards">'+
+        '<div class="stat-card"><div class="num">'+summary.total+'</div><div class="lbl">Total Bids</div></div>'+
+        '<div class="stat-card"><div class="num">'+pesoFmt(summary.pipelineValue)+'</div><div class="lbl">Open Pipeline Value</div></div>'+
+        '<div class="stat-card"><div class="num">'+(summary.winRate==null?'—':summary.winRate+'%')+'</div><div class="lbl">Win Rate</div></div>'+
+        '<div class="stat-card"><div class="num">'+(summary.avgDaysToAward==null?'—':summary.avgDaysToAward)+'</div><div class="lbl">Avg Days to Award</div></div>'+
+      '</div>'+
+      '<div class="panel"><h2>Stage Summary</h2><div class="stats-grid">'+BID_STAGES.map(s=>'<div class="stat"><b>'+(byStage[s]||0)+'</b><span>'+esc(s)+'</span></div>').join('')+'</div></div>'+
+      '<div class="panel"><div class="section-title"><h2>Bid Pipeline ('+data.count+')</h2><button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+bidTable(data.bids||[])+'</div>';
+  }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
+}
+
+function bidTable(bids){
+  if(!bids.length) return emptyHtml('📄','No bids match this filter yet.');
+  return '<div class="table-wrap"><table><thead><tr><th>Bid</th><th>Company</th><th>Agent</th><th>Stage</th><th>Value</th><th>Deadline</th><th>Updated</th><th></th></tr></thead><tbody>'+bids.map(b=>
+    '<tr><td><b>'+esc(b.bidTitle)+'</b><br><small style="color:var(--muted)">'+esc(b.bidId)+'</small></td>'+
+    '<td><b>'+esc(b.companyName||'')+'</b><br><small style="color:var(--muted)">'+esc(b.companyId||'')+'</small></td>'+
+    '<td>'+esc(b.agent||'—')+'</td><td>'+bidStagePill(b.bidStage)+'</td>'+
+    '<td class="nowrap">'+pesoFmt(b.estimatedValue)+'</td><td class="nowrap">'+esc(b.submissionDeadline||'—')+'</td>'+
+    '<td class="nowrap">'+esc(b.updatedAt||b.createdAt||'')+'<br><small style="color:var(--muted)">'+esc(b.updatedBy||b.createdBy||'')+'</small></td>'+
+    '<td class="nowrap"><button class="btn btn-sm btn-primary" data-action="bid-stage-modal" data-bid="'+esc(b.bidId)+'" data-title="'+esc(b.bidTitle)+'" data-stage="'+esc(b.bidStage)+'">Update Stage</button> '+
+    '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(b.companyId)+'" data-cname="'+esc(b.companyName)+'">History</button> '+
+    '<button class="btn btn-sm btn-danger" data-action="bid-delete" data-bid="'+esc(b.bidId)+'">Delete</button></td></tr>'
+  ).join('')+'</tbody></table></div>';
+}
+
+ACTIONS['bid-apply']=()=>{
+  const f=state.bidFilters;
+  f.from=$('#bid-from').value; f.to=$('#bid-to').value; f.agent=$('#bid-agent').value; f.stage=$('#bid-stage').value;
+  renderBidPipeline($('#tab-content'));
+};
+ACTIONS['bid-quick']=(el,d)=>{ quickRange(state.bidFilters,d.q); renderBidPipeline($('#tab-content')); };
+ACTIONS['bid-new']=()=>openBidCreateModal({});
+
+function openBidCreateModal(prefill){
+  prefill=prefill||{};
+  openModal(
+    '<div class="modal-head"><h2>Create Bid Opportunity</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-body"><div class="form-grid">'+
+      '<div><label>Company ID *</label><input id="bm-company" value="'+esc(prefill.companyId||'')+'" placeholder="Paste company ID"></div>'+
+      '<div><label>Related Call ID</label><input id="bm-call" value="'+esc(prefill.callId||'')+'" placeholder="Optional"></div>'+
+      '<div class="full"><label>Bid Title *</label><input id="bm-title" value="'+esc(prefill.bidTitle||'')+'" placeholder="e.g. Booth requirement for trade fair"></div>'+
+      '<div><label>Estimated Value (PHP)</label><input id="bm-value" inputmode="decimal" placeholder="Optional"></div>'+
+      '<div><label>Submission Deadline</label><input type="date" id="bm-deadline"></div>'+
+    '</div></div>'+
+    '<div class="modal-foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="bid-save">Create Bid</button></div>'
+  );
+}
+
+ACTIONS['bid-save']=async (el)=>{
+  const companyId=$('#bm-company').value.trim();
+  const bidTitle=$('#bm-title').value.trim();
+  if(!companyId || !bidTitle){ toast('Company ID and Bid Title are required','error'); return; }
+  el.disabled=true; el.textContent='Creating…';
+  try{
+    await api('createBid',{companyId,bidTitle,callId:$('#bm-call').value.trim(),estimatedValue:$('#bm-value').value.trim(),submissionDeadline:$('#bm-deadline').value});
+    toast('Bid created','success'); closeModal(); renderTab('bids');
+  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Create Bid'; }
+};
+
+ACTIONS['bid-stage-modal']=(el,d)=>{
+  openModal(
+    '<div class="modal-head"><h2>Update Bid Stage</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-body"><div class="form-grid">'+
+      '<div class="full"><label>Bid</label><input value="'+esc(d.title||d.bid)+'" disabled></div>'+
+      '<div><label>New Stage *</label><select id="bs-stage">'+bidStageOptions(String(d.stage||'').toUpperCase(),false)+'</select></div>'+
+      '<div><label>Outcome Date</label><input type="date" id="bs-outcome-date" value="'+todayStr()+'"></div>'+
+      '<div class="full"><label>Outcome</label><input id="bs-outcome" placeholder="Required only for Awarded / Lost / No Decision"></div>'+
+      '<div class="full"><label>Outcome Notes</label><textarea id="bs-notes" rows="3"></textarea></div>'+
+    '</div><p style="color:var(--muted);font-size:12.5px;margin-top:10px">Outcome and outcome date are required when closing a bid.</p></div>'+
+    '<div class="modal-foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="bid-stage-save" data-bid="'+esc(d.bid)+'">Save Stage</button></div>'
+  );
+};
+
+ACTIONS['bid-stage-save']=async (el,d)=>{
+  const newStage=$('#bs-stage').value;
+  const params={bidId:d.bid,newStage,outcome:$('#bs-outcome').value.trim(),outcomeDate:$('#bs-outcome-date').value,outcomeNotes:$('#bs-notes').value.trim()};
+  if(BID_CLOSED_STAGES.has(newStage) && (!params.outcome || !params.outcomeDate)){ toast('Outcome and outcome date are required when closing a bid','error'); return; }
+  el.disabled=true; el.textContent='Saving…';
+  try{ await api('updateBidStage',params); toast('Bid updated','success'); closeModal(); renderTab('bids'); }
+  catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Stage'; }
+};
+
+ACTIONS['bid-delete']=async (el,d)=>{
+  if(!confirm('Delete this bid from the pipeline?')) return;
+  el.disabled=true;
+  try{ await api('deleteBid',{bidId:d.bid}); toast('Bid deleted','success'); renderTab('bids'); }
+  catch(e){ toast(e.message,'error'); el.disabled=false; }
+};
+
 /* ==================== MANAGER: AGENT PERFORMANCE ====================== */
 
 async function renderPerformance(c){
+  await ensureUsers();
   if(!state.perfFilters) state.perfFilters={from:monthStart(), to:todayStr(), agent:'ALL'};
   const f=state.perfFilters;
   c.innerHTML='<div class="panel">'+dateAgentBar(f,'pf','pf-apply')+'</div><div id="pf-body">'+loadingHtml('Loading performance…')+'</div>';
@@ -1338,6 +1503,7 @@ const TRAIL_TYPES=[
 ];
 
 async function renderWorkTrail(c){
+  await ensureUsers();
   if(!state.trailFilters || state.user.role==='MANAGER' && state.trailFilters.locked){
     state.trailFilters={from:addDays(-6),to:todayStr(),agent:'ALL',type:'all'};
   }
@@ -1419,6 +1585,7 @@ async function renderUsers(c){
       '<td class="nowrap">'+
         '<button class="btn btn-sm" data-action="user-edit" data-code="'+esc(u.code)+'">Edit</button> '+
         '<button class="btn btn-sm" data-action="user-pin" data-code="'+esc(u.code)+'">Reset PIN</button> '+
+        '<button class="btn btn-sm" data-action="user-unlock" data-code="'+esc(u.code)+'">Unlock</button> '+
         '<button class="btn btn-sm '+(u.active?'btn-danger':'')+'" data-action="user-toggle" data-code="'+esc(u.code)+'" data-active="'+u.active+'">'+(u.active?'Deactivate':'Reactivate')+'</button>'+
       '</td></tr>').join('')+'</tbody></table></div></div>'+
     '<div class="panel"><h2>Phone Number Cleanup</h2>'+
@@ -1443,6 +1610,12 @@ ACTIONS['user-pin']=async (el,d)=>{
   try{ await api('resetUserPin',{by:state.user.code,code:d.code,newPin:pin.trim()}); toast('PIN reset for '+d.code,'success'); }
   catch(e){ toast(e.message,'error'); }
 };
+ACTIONS['user-unlock']=async (el,d)=>{
+  el.disabled=true;
+  try{ await api('unlockUser',{by:state.user.code,code:d.code}); toast('User '+d.code+' unlocked','success'); renderTab('users'); }
+  catch(e){ toast(e.message,'error'); el.disabled=false; }
+};
+
 ACTIONS['user-toggle']=async (el,d)=>{
   const makeActive = d.active!=='true';
   if(!makeActive && !confirm('Deactivate '+d.code+'? They will no longer be able to log in.')) return;
@@ -1459,7 +1632,7 @@ ACTIONS['demo-reset']=async (el)=>{
   try{
     const r=await api('resetDemoActivity',{by:state.user.code,confirmToken:'CONFIRM-RESET'});
     toast(r.message,'success');
-    state.queue=null; state.lastReport=null; state.lastMgrReport=null;
+    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null;
     renderTab('users');
   }catch(e){ toast(e.message,'error'); }
   el.disabled=false; el.textContent='Reset Demo Data';
@@ -1487,7 +1660,7 @@ ACTIONS['phone-sync']=async (el)=>{
     const stats=await api('syncCompanyContactNumbers',{});
     toast('Phone cleanup complete: '+stats.numbersExtracted+' numbers from '+stats.companiesScanned+' companies','success');
     renderPhoneStats(stats);
-    state.queue=null; state.lastReport=null; state.lastMgrReport=null; // cards must pick up new numbers
+    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; // cards must pick up new numbers
   }catch(e){ toast(e.message,'error'); }
   el.disabled=false; el.textContent='Run Phone Cleanup';
 };
@@ -1588,12 +1761,19 @@ async function openCallModal(companyId, companyName, historyOnly){
       (h.followUpDate?'<div>Follow-up: <b>'+esc(h.followUpDate)+'</b></div>':'')+
       (h.clientEventName?'<div>🎪 '+esc(h.clientEventName)+(h.clientEventDate?' ('+esc(h.clientEventDate)+')':'')+'</div>':'')+
       (h.notes?'<div style="color:var(--muted)">'+esc(h.notes)+'</div>':'')+
+      (state.user && state.user.role==='MANAGER' && String(h.result||'').toUpperCase()==='BIDDING REQUIREMENT' ? '<div style="margin-top:7px"><button class="btn btn-sm btn-primary" data-action="bid-from-call" data-cid="'+esc(h.companyId||companyId)+'" data-cname="'+esc(h.companyName||companyName)+'" data-call="'+esc(h.callId||'')+'">Create Bid from this Call</button></div>' : '')+
       '</div>').join('')
       : emptyHtml('🆕','No previous calls for this company.');
   }catch(e){
     const box=$('#cm-history'); if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>';
   }
 }
+
+ACTIONS['bid-from-call']=(el,d)=>{
+  const title = 'Bid requirement — ' + (d.cname || d.cid || 'company');
+  closeModal();
+  openBidCreateModal({companyId:d.cid, callId:d.call, bidTitle:title});
+};
 
 ACTIONS['call-save']=async (el,d)=>{
   const result=$('#cm-result').value;
@@ -1619,9 +1799,17 @@ ACTIONS['edit-company']=(el,d)=>{
   if(co) openCompanyModal(co);
 };
 
+ACTIONS['company-new'] = () => {
+  openCompanyModal({
+    companyId:'', companyName:'', category:'', primaryContact:'',
+    title:'', phone:'', mobile:'', email:'',
+    otherContacts:'', eventsParticipated:'', possibleRequirements:''
+  });
+};
+
 function openCompanyModal(co){
   openModal(
-    '<div class="modal-head"><h2>Edit Company — '+esc(co.companyName)+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-head"><h2>'+(co.companyId ? 'Edit Company — '+esc(co.companyName) : 'Add New Company')+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
     '<div class="modal-body"><div class="form-grid">'+
       '<div class="full"><label>Company Name *</label><input id="com-name" value="'+esc(co.companyName)+'"></div>'+
       '<div><label>Industry / Category</label><input id="com-cat" value="'+esc(co.category)+'"></div>'+
