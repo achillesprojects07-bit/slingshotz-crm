@@ -162,6 +162,14 @@
   .funnel-row{display:flex;align-items:center;justify-content:space-between;border-radius:8px;padding:9px 14px;font-weight:600;font-size:13.5px}
   .funnel-sub{margin-left:24px;border-radius:7px;padding:7px 12px;font-size:12.5px}
 
+  /* ---------- visual dashboard bars ---------- */
+  .bar-list{display:flex;flex-direction:column;gap:9px}
+  .bar-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(90px,2fr) 34px;gap:10px;align-items:center;font-size:13px}
+  .bar-label{font-weight:650;color:var(--ink)}
+  .bar-track{height:12px;background:#e2e8f0;border-radius:999px;overflow:hidden}
+  .bar-fill{height:100%;background:var(--brand);border-radius:999px;min-width:0}
+  .bar-value{text-align:right;font-weight:800;color:var(--ink)}
+
   @media(max-width:640px){
     .cards{grid-template-columns:repeat(2,1fr)}
     .form-grid{grid-template-columns:1fr}
@@ -179,7 +187,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b>B3.2 DASHBOARD FIX</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b>B3.3 DASHBOARD FIX</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -199,7 +207,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="badge badge-demo" id="app-build-tag">B3.2 DASHBOARD FIX</span>
+      <span class="badge badge-demo" id="app-build-tag">B3.3 DASHBOARD FIX</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -658,6 +666,18 @@ function countMeaningfulRows(rows){ return (rows||[]).filter(c=>MEANINGFUL.has(S
 function countByResultLocal(rows){ const o={}; (rows||[]).forEach(c=>{ const r=String(c.result||'').toUpperCase().trim(); if(r) o[r]=(o[r]||0)+1; }); return o; }
 function sumSetCounts(counts,set){ let n=0; set.forEach(r=>{ n+=safeNum(counts[r]); }); return n; }
 
+function barList(items){
+  items = items || [];
+  const max = Math.max(1, ...items.map(x=>safeNum(x.count)));
+  return '<div class="bar-list">'+items.map(x=>{
+    const count = safeNum(x.count);
+    const pct = Math.max(0, Math.round((count/max)*100));
+    return '<div class="bar-row"><div class="bar-label">'+esc(x.label)+'</div>'+
+      '<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"></div></div>'+
+      '<div class="bar-value">'+count+'</div></div>';
+  }).join('')+'</div>';
+}
+
 function renderFunnel(todayCalls, needsActionCount){
   const fRow = (bg,text,count,cls)=>
     '<div class="funnel-row'+(cls?' '+cls:'')+'" style="background:'+bg+';color:#fff"><span>'+text+'</span><b>'+count+'</b></div>';
@@ -675,7 +695,7 @@ function renderFunnel(todayCalls, needsActionCount){
     '<div class="funnel-flow">'+
     fRow('#1A3A6B','📞 Calls Made Today',total)+
     (productive ? fRow('#047857','Productive Calls',productive) : '')+
-    (followups ? fRow('#F59E0B','Follow-Ups Due / Opened',followups) : '')+
+    (followups ? fRow('#F59E0B','Follow-Ups Due',followups) : '')+
     (meetings ? fRow('#6D28D9','Meetings Booked',meetings) : '')+
     (retry ? fRow('#64748B','Calls to Retry',retry) : '')+
     (review ? fRow('#B45309','Review Company Details',review) : '')+
@@ -1362,7 +1382,7 @@ function dateAgentBar(f, idPrefix, applyAction){
   return '<div class="quick-ranges">'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="today">Today</button>'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="yesterday">Yesterday</button>'+
-      '<button class="chip" data-action="'+applyAction+'-quick" data-q="7">Last 7 Days</button>'+
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="7">Last 7 Days</button>'+ 
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="30">Last 30 Days</button>'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="month">This Month</button>'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="all">All</button>'+
