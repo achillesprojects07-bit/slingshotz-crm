@@ -2026,7 +2026,7 @@ async function openCallModal(companyId, companyName, historyOnly){
       '<div class="form-grid">'+
         '<div class="full"><label>Call Result *</label><select id="cm-result"><option value="">Select result…</option>'+
           callResultOptions()+'</select></div>'+
-        '<div><label>Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+
+        '<div><label id="cm-fudate-label">Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+
         '<div><label>Client Event Date</label><input type="date" id="cm-evdate"></div>'+
         '<div class="full"><label>Client Event Name</label><input id="cm-evname" placeholder="e.g. Product launch, trade show booth…"></div>'+
         '<div class="full"><label>Notes</label><textarea id="cm-notes" rows="3" placeholder="What happened on the call?"></textarea></div>'+
@@ -2038,20 +2038,22 @@ async function openCallModal(companyId, companyName, historyOnly){
     (historyOnly?'':'<button class="btn btn-primary" data-action="call-save" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Save Call</button>')+
     '</div>'
   );
-  try{
-    const data = await api('getCallHistory',{companyId});
-    const box=$('#cm-history'); if(!box) return;
-    box.innerHTML = data.history.length ? data.history.map(h=>
-      '<div class="hist-item"><div class="top"><span><b>'+esc(h.agent)+'</b> · '+esc(h.timestamp)+'</span>'+resultPill(h.result)+'</div>'+
-      (h.followUpDate?'<div>Follow-up: <b>'+esc(h.followUpDate)+'</b></div>':'')+
-      (h.clientEventName?'<div>🎪 '+esc(h.clientEventName)+(h.clientEventDate?' ('+esc(h.clientEventDate)+')':'')+'</div>':'')+
-      (h.notes?'<div style="color:var(--muted)">'+esc(h.notes)+'</div>':'')+
-      (state.user && state.user.role==='MANAGER' && String(h.result||'').toUpperCase()==='BIDDING REQUIREMENT' ? '<div style="margin-top:7px"><button class="btn btn-sm btn-primary" data-action="bid-from-call" data-cid="'+esc(h.companyId||companyId)+'" data-cname="'+esc(h.companyName||companyName)+'" data-call="'+esc(h.callId||'')+'">Create Bid from this Call</button></div>' : '')+
-      '</div>').join('')
-      : emptyHtml('🆕','No previous calls for this company.');
-  }catch(e){
-    const box=$('#cm-history'); if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>';
+
+  if (!historyOnly) {
+    const resultSelect = document.getElementById('cm-result');
+    const dateLabel = document.getElementById('cm-fudate-label');
+
+    function updateDateLabel(){
+      const result = String(resultSelect.value || '').toUpperCase();
+      const isMeeting = result === 'COMPANY PROFILE MEETING SET' || result === 'PROJECT BRIEFING MEETING SET';
+      dateLabel.textContent = isMeeting ? 'Meeting Date' : 'Next Follow-Up Date';
+    }
+
+    resultSelect.addEventListener('change', updateDateLabel);
+    updateDateLabel();
   }
+
+  await loadCallHistory(companyId);
 }
 
 ACTIONS['bid-from-call']=(el,d)=>{
