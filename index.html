@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Slingshotz CRM</title>
 <style>
   :root{
@@ -52,6 +55,8 @@
   .badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 11px;font-size:11.5px;font-weight:700;letter-spacing:.04em}
   .badge-demo{background:var(--warn-soft);color:var(--warn)}
   .badge-live{background:var(--bad-soft);color:var(--bad)}
+  .build-tag{display:inline-flex;align-items:center;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800;letter-spacing:.04em}
+  .build-tag strong{color:var(--brand);font-weight:900}
   .user-chip{display:flex;align-items:center;gap:8px;font-size:13px}
   .user-chip b{font-size:13px}
   .user-chip small{color:var(--muted)}
@@ -198,7 +203,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue</div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B1.1 DATE FILTERS</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -218,6 +223,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
+      <span class="build-tag" id="app-build-tag">B1.1 DATE FILTERS</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -269,6 +275,7 @@ const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILA
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED','NUMBER UNREACHABLE','WRONG NUMBER']);
 const PAGE_SIZE = 50;
+const APP_BUILD = 'B1.1 DATE FILTERS';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -282,6 +289,7 @@ const state = {
   queueFilters: { cat:'', search:'', eventsJoined:'', page:1 },
   dashCard: 'completedToday',   // selected agent dashboard card
   mgrKpi: 'calls',       // selected manager KPI
+  dashFilters: null,
   mgrFilters: null,
   perfFilters: null,
   trailFilters: null,
@@ -572,6 +580,7 @@ ACTIONS['view-numbers'] = async (el,d)=>{
 /* ------------------------------- login -------------------------------- */
 
 async function initLogin(){
+  const lb=$('#login-build-tag'); if(lb) lb.textContent=APP_BUILD;
   if (API_URL.indexOf('http') !== 0){
     $('#config-banner').style.display='block';
     $('#login-user').innerHTML='<option value="">API not configured</option>';
@@ -629,7 +638,7 @@ const AGENT_TABS = [
   {id:'leaderboard', label:'Leaderboard', render: renderLeaderboard}
 ];
 const MANAGER_TABS = [
-  {id:'command', label:'Command Center', render: renderCommandCenter},
+  {id:'command', label:'Manager Dashboard', render: renderCommandCenter},
   {id:'performance', label:'Agent Performance', render: renderPerformance},
   {id:'worktrail', label:'Work Trail', render: renderWorkTrail},
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
@@ -645,6 +654,7 @@ function enterApp(){
   $('#app-view').style.display='block';
   $('#hdr-name').textContent = state.user.name + ' ('+state.user.code+')';
   $('#hdr-role').textContent = state.user.role==='MANAGER' ? '· Manager' : '· Telemarketer';
+  const bt=$('#app-build-tag'); if(bt) bt.textContent=APP_BUILD;
   updateModeBadge();
   const canSwitch = state.user.role==='MANAGER' || state.user.canSwitchLive;
   $('#mode-switch').style.display = canSwitch ? 'inline-flex' : 'none';
@@ -775,37 +785,96 @@ const DASH_CARDS = [
   {key:'targetProgress', label:'My Target Progress'}
 ];
 
-function agentDashCardValue(card, rep){
-  const todayCalls = rep.todayCalls || [];
-  const counts = countByResult(todayCalls);
-  if(card.key==='completedToday') return (rep.counts.completedToday||0)+' / '+(rep.counts.dailyTarget||0);
-  if(card.key==='productiveToday') return totalCount(productiveBreakdownFromRows(todayCalls));
+function agentDashCardValue(card, rep, rangeCalls){
+  rangeCalls = rangeCalls || rep.todayCalls || [];
+  const counts = countByResult(rangeCalls);
+  if(card.key==='completedToday') return isTodayRange(state.dashFilters) ? (rangeCalls.length||0)+' / '+(rep.counts.dailyTarget||0) : rangeCalls.length;
+  if(card.key==='productiveToday') return totalCount(productiveBreakdownFromRows(rangeCalls));
   if(card.key==='retryToday') return sumResults(counts, Array.from(RETRY));
   if(card.key==='targetProgress') return (rep.counts.completedToday||0)+' / '+(rep.counts.dailyTarget||0);
   return rep.counts[card.key] || 0;
 }
 
+
+function isTodayRange(f){ return f && f.from===todayStr() && f.to===todayStr(); }
+
+function callRowsFromActivity(entries){
+  return (entries||[]).filter(en=>String(en.type||'').toUpperCase()==='CALL LOGGED').map(en=>{
+    const details = String(en.details||'');
+    const parts = details.split('|').map(x=>x.trim());
+    const result = parts[0] || '';
+    let followUpDate = '';
+    const fm = details.match(/follow-up\s+([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+    if(fm) followUpDate = fm[1];
+    return {
+      timestamp: en.timestamp || '',
+      agent: en.agent || state.user.code,
+      companyId: en.companyId || '',
+      companyName: en.company || '',
+      result: result,
+      followUpDate: followUpDate,
+      clientEventName: '',
+      clientEventDate: '',
+      notes: details
+    };
+  });
+}
+
+async function agentDashboardCallsForRange(rep, f){
+  if(isTodayRange(f)) return rep.todayCalls || [];
+  const data = await api('getMyActivity', {fromDate:f.from, toDate:f.to, type:'calls'});
+  return callRowsFromActivity(data.entries || []);
+}
+
+function dashRangeWord(){
+  const f=state.dashFilters || {from:todayStr(),to:todayStr()};
+  return isTodayRange(f) ? 'Today' : 'in Range';
+}
+
+function agentDashLabel(card){
+  const w = dashRangeWord();
+  if(card.key==='completedToday') return isTodayRange(state.dashFilters) ? 'My Calls Today' : 'My Calls in Range';
+  if(card.key==='productiveToday') return isTodayRange(state.dashFilters) ? 'My Productive Calls Today' : 'My Productive Calls in Range';
+  if(card.key==='retryToday') return isTodayRange(state.dashFilters) ? 'My Calls to Retry Today' : 'My Calls to Retry in Range';
+  if(card.key==='followups') return 'My Open Follow-Ups';
+  if(card.key==='targetProgress') return 'My Target Progress Today';
+  return card.label;
+}
+
 async function renderAgentDashboard(c){
+  if(!state.dashFilters) state.dashFilters={from:todayStr(), to:todayStr()};
+  c.innerHTML = '<div class="panel">'+dashboardDateBar(state.dashFilters,'ad','ad-apply')+'</div>'+loadingHtml('Loading dashboard…');
   const rep = await api('getAgentDashboardReport', {user: state.user.code});
+  const rangeCalls = await agentDashboardCallsForRange(rep, state.dashFilters);
   state.lastReport = rep;
-  const productiveItems = productiveBreakdownFromRows(rep.todayCalls||[]);
-  const outcomeGroups = groupedOutcomeData(rep.todayCalls||[]);
+  state.lastRangeCalls = rangeCalls;
+  const productiveItems = productiveBreakdownFromRows(rangeCalls);
+  const outcomeGroups = groupedOutcomeData(rangeCalls);
+  const titleRange = isTodayRange(state.dashFilters) ? 'Today' : '('+rangeLabel(state.dashFilters)+')';
   c.innerHTML =
+    '<div class="panel">'+dashboardDateBar(state.dashFilters,'ad','ad-apply')+'</div>'+ 
     '<div class="cards">'+DASH_CARDS.map(card=>
       '<div class="stat-card'+(state.dashCard===card.key?' selected':'')+'" data-action="dash-card" data-key="'+card.key+'">'+
-      '<div class="num">'+agentDashCardValue(card, rep)+'</div><div class="lbl">'+card.label+'</div></div>').join('')+
-    '</div>'+
+      '<div class="num">'+agentDashCardValue(card, rep, rangeCalls)+'</div><div class="lbl">'+agentDashLabel(card)+'</div></div>').join('')+
+    '</div>'+ 
     '<div class="dashboard-grid">'+
-      '<div class="panel"><div class="section-title"><h2>My Call Results Today</h2></div>'+barList(productiveItems.concat([
-        {label:'Closed / Not Leads', count:sumResults(countByResult(rep.todayCalls||[]), Array.from(CLOSED))},
-        {label:'Calls to Retry', count:sumResults(countByResult(rep.todayCalls||[]), Array.from(RETRY))}
-      ]))+'</div>'+
-      '<div class="panel"><div class="section-title"><h2>My Detailed Outcome Breakdown</h2></div>'+groupedOutcomeHtml(outcomeGroups)+'</div>'+
-    '</div>'+
-    renderFunnel(rep.todayCalls||[], rep.counts.needsAction||0)+
+      '<div class="panel"><div class="section-title"><h2>My Call Results '+titleRange+'</h2></div>'+barList(productiveItems.concat([
+        {label:'Closed / Not Leads', count:sumResults(countByResult(rangeCalls), Array.from(CLOSED))},
+        {label:'Calls to Retry', count:sumResults(countByResult(rangeCalls), Array.from(RETRY))}
+      ]))+'</div>'+ 
+      '<div class="panel"><div class="section-title"><h2>My Detailed Outcome Breakdown '+titleRange+'</h2></div>'+groupedOutcomeHtml(outcomeGroups)+'</div>'+ 
+    '</div>'+ 
+    (isTodayRange(state.dashFilters) ? renderFunnel(rangeCalls, rep.counts.needsAction||0) : '')+
     '<div class="panel"><div class="section-title"><h2 id="dash-detail-title"></h2></div><div id="dash-detail"></div></div>';
   renderDashDetail();
 }
+
+ACTIONS['ad-apply']=()=>{
+  const f=state.dashFilters;
+  f.from=$('#ad-from').value; f.to=$('#ad-to').value;
+  renderAgentDashboard($('#tab-content'));
+};
+ACTIONS['ad-apply-quick']=(el,d)=>{ quickRange(state.dashFilters,d.q); renderAgentDashboard($('#tab-content')); };
 
 ACTIONS['dash-card'] = (el,d)=>{
   state.dashCard = d.key;
@@ -815,16 +884,41 @@ ACTIONS['dash-card'] = (el,d)=>{
 
 function renderDashDetail(){
   const rep = state.lastReport; if(!rep) return;
+  const rangeCalls = state.lastRangeCalls || rep.todayCalls || [];
   const box=$('#dash-detail'), title=$('#dash-detail-title');
   if(!box) return;
   const key = state.dashCard;
-  if (key==='targets'){ title.textContent='My Target List ('+rep.counts.targets+')'; box.innerHTML=targetTable(rep.targets); }
-  else if (key==='followups'){ title.textContent='My Follow-Ups ('+rep.counts.followups+')'; box.innerHTML=followupCards(rep.followups); }
-  else if (key==='meetings'){ title.textContent='My Meetings Booked ('+rep.counts.meetings+')'; box.innerHTML=followupCards(rep.meetings); }
-  else if (key==='retryToday'){ const retryCalls=(rep.todayCalls||[]).filter(c=>RETRY.has(String(c.result||'').toUpperCase())); title.textContent='My Calls to Retry Today ('+retryCalls.length+')'; box.innerHTML=callTable(retryCalls,{hideAgent:true}); }
-  else if (key==='needsAction'){ title.textContent='Retry Cap Reached ('+rep.counts.needsAction+')'; box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a productive result. Review and try again when ready.</p>'+targetTable(rep.needsAction); }
-  else if (key==='targetProgress'){ title.textContent='My Target Progress ('+(rep.counts.completedToday||0)+' of '+(rep.counts.dailyTarget||0)+')'; box.innerHTML=targetTable(rep.targets||[]); }
-  else { title.textContent=(key==='productiveToday'?'My Productive Calls Today':'Calls Completed Today')+' ('+(rep.todayCalls||[]).length+')'; box.innerHTML=callTable(key==='productiveToday' ? (rep.todayCalls||[]).filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase())) : rep.todayCalls,{hideAgent:true}); }
+  const rangeText = isTodayRange(state.dashFilters) ? 'Today' : rangeLabel(state.dashFilters);
+  if (key==='targetProgress'){
+    title.textContent='My Target Progress Today ('+(rep.counts.completedToday||0)+' / '+(rep.counts.dailyTarget||0)+')';
+    box.innerHTML=targetTable(rep.targets||[]);
+  }
+  else if (key==='followups'){
+    title.textContent='My Open Follow-Ups ('+rep.counts.followups+')';
+    box.innerHTML=followupCards(rep.followups||[]);
+  }
+  else if (key==='meetings'){
+    title.textContent='My Meetings Booked ('+rep.counts.meetings+')';
+    box.innerHTML=followupCards(rep.meetings||[]);
+  }
+  else if (key==='needsAction'){
+    title.textContent='Retry Cap Reached ('+rep.counts.needsAction+')';
+    box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a meaningful result. Review and try again when ready.</p>'+targetTable(rep.needsAction||[]);
+  }
+  else if (key==='retryToday'){
+    const retryRows = rangeCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase()));
+    title.textContent='My Calls to Retry — '+rangeText+' ('+retryRows.length+')';
+    box.innerHTML=callTable(retryRows,{hideAgent:true});
+  }
+  else if (key==='productiveToday'){
+    const productiveRows = rangeCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase()));
+    title.textContent='My Productive Calls — '+rangeText+' ('+productiveRows.length+')';
+    box.innerHTML=callTable(productiveRows,{hideAgent:true});
+  }
+  else {
+    title.textContent='My Calls — '+rangeText+' ('+rangeCalls.length+')';
+    box.innerHTML=callTable(rangeCalls,{hideAgent:true});
+  }
 }
 
 /* ======================= AGENT: MY TARGET LIST ======================== */
@@ -1348,6 +1442,48 @@ function agentOptions(selected){
   return '<option value="ALL">All agents</option>'+agents.map(u=>'<option value="'+esc(u.code)+'"'+(selected===u.code?' selected':'')+'>'+esc(u.code)+' — '+esc(u.name)+'</option>').join('');
 }
 
+
+function rangeLabel(f){
+  const today=todayStr(), yesterday=addDays(-1);
+  if(f.from===today && f.to===today) return 'Today';
+  if(f.from===yesterday && f.to===yesterday) return 'Yesterday';
+  if(f.from===addDays(-6) && f.to===today) return 'Last 7 Days';
+  if(f.from===monthStart() && f.to===today) return 'This Month';
+  if(f.from || f.to) return (f.from||'Start')+' to '+(f.to||'Today');
+  return 'All Dates';
+}
+
+function dashboardDateBar(f, idPrefix, applyAction){
+  return '<div class="section-title"><h2>Dashboard Date Filter</h2><small style="color:var(--muted);font-weight:700">Viewing: '+esc(rangeLabel(f))+'</small></div>'+ 
+    '<div class="quick-ranges">'+
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="today">Today</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="yesterday">Yesterday</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="7">Last 7 Days</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="month">This Month</button>'+ 
+    '</div>'+ 
+    '<div class="filter-bar">'+
+      '<div class="field"><label>From Date</label><input type="date" id="'+idPrefix+'-from" value="'+esc(f.from)+'"></div>'+ 
+      '<div class="field"><label>To Date</label><input type="date" id="'+idPrefix+'-to" value="'+esc(f.to)+'"></div>'+ 
+      '<button class="btn btn-primary" data-action="'+applyAction+'">Apply Custom Range</button>'+ 
+    '</div>';
+}
+
+function dashboardDateAgentBar(f, idPrefix, applyAction){
+  return '<div class="section-title"><h2>Manager Dashboard Date Filter</h2><small style="color:var(--muted);font-weight:700">Viewing: '+esc(rangeLabel(f))+'</small></div>'+ 
+    '<div class="quick-ranges">'+
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="today">Today</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="yesterday">Yesterday</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="7">Last 7 Days</button>'+ 
+      '<button class="chip" data-action="'+applyAction+'-quick" data-q="month">This Month</button>'+ 
+    '</div>'+ 
+    '<div class="filter-bar">'+
+      '<div class="field"><label>From Date</label><input type="date" id="'+idPrefix+'-from" value="'+esc(f.from)+'"></div>'+ 
+      '<div class="field"><label>To Date</label><input type="date" id="'+idPrefix+'-to" value="'+esc(f.to)+'"></div>'+ 
+      '<div class="field"><label>Agent</label><select id="'+idPrefix+'-agent">'+agentOptions(f.agent)+'</select></div>'+ 
+      '<button class="btn btn-primary" data-action="'+applyAction+'">Apply Custom Range</button>'+ 
+    '</div>';
+}
+
 function dateAgentBar(f, idPrefix, applyAction){
   return '<div class="quick-ranges">'+
       '<button class="chip" data-action="'+applyAction+'-quick" data-q="today">Today</button>'+
@@ -1372,6 +1508,7 @@ function readBar(idPrefix, f){
 
 function quickRange(f, q){
   if(q==='today'){ f.from=todayStr(); f.to=todayStr(); }
+  else if(q==='yesterday'){ f.from=addDays(-1); f.to=addDays(-1); }
   else if(q==='7'){ f.from=addDays(-6); f.to=todayStr(); }
   else if(q==='30'){ f.from=addDays(-29); f.to=todayStr(); }
   else if(q==='month'){ f.from=monthStart(); f.to=todayStr(); }
@@ -1380,9 +1517,9 @@ function quickRange(f, q){
 
 async function renderCommandCenter(c){
   await ensureUsers();
-  if(!state.mgrFilters) state.mgrFilters={from:addDays(-6), to:todayStr(), agent:'ALL'};
+  if(!state.mgrFilters) state.mgrFilters={from:todayStr(), to:todayStr(), agent:'ALL'};
   const f=state.mgrFilters;
-  c.innerHTML='<div class="panel">'+dateAgentBar(f,'cc','cc-apply')+'</div><div id="cc-body">'+loadingHtml('Loading command center…')+'</div>';
+  c.innerHTML='<div class="panel">'+dashboardDateAgentBar(f,'cc','cc-apply')+'</div><div id="cc-body">'+loadingHtml('Loading command center…')+'</div>';
   await loadCommandCenter();
 }
 
@@ -1419,7 +1556,7 @@ async function loadCommandCenter(){
         '<div class="panel"><div class="section-title"><h2>Manager Action Summary</h2></div>'+managerActionSummary(rep, productiveItems, outcomeGroups)+'</div>'+
       '</div>'+
       '<div class="panel"><div class="section-title"><h2>Call Outcome Breakdown</h2><small style="color:var(--muted)">Grouped the same way agents log call results.</small></div>'+groupedOutcomeHtml(outcomeGroups)+'</div>'+
-      '<div class="panel"><h2>Today’s Summary</h2><ul class="insights">'+rep.insights.map(i=>'<li>'+esc(String(i).replace(/Meaningful conversations/gi,'Productive calls').replace(/meaningful conversations/gi,'productive calls'))+'</li>').join('')+'</ul></div>'+
+      '<div class="panel"><h2>Summary — '+esc(rangeLabel(f))+'</h2><ul class="insights">'+rep.insights.map(i=>'<li>'+esc(String(i).replace(/Meaningful conversations/gi,'Productive calls').replace(/meaningful conversations/gi,'productive calls'))+'</li>').join('')+'</ul></div>'+
       '<div class="panel"><div class="section-title"><h2 id="cc-drill-title"></h2></div><div id="cc-drill"></div></div>'+
       '<div class="panel"><h2>Needs Manager Attention ('+(rep.attention||[]).length+')</h2><div id="cc-attn">'+attentionList(rep.attention||[])+'</div></div>'+
       '<div class="panel"><h2>Agent Activity Snapshot</h2>'+snapshotTable(rep.snapshot||[])+'</div>';
