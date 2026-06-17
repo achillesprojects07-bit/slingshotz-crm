@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4.3 AGENT CONTACT REVIEW WORKFLOW</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B5 BID PROPOSAL PIPELINE</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B4.3 AGENT CONTACT REVIEW WORKFLOW</span>
+      <span class="build-tag" id="app-build-tag">B5 BID PROPOSAL PIPELINE</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -292,7 +292,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B4.3 AGENT CONTACT REVIEW WORKFLOW';
+const APP_BUILD = 'B5 BID PROPOSAL PIPELINE';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -652,6 +652,7 @@ const AGENT_TABS = [
   {id:'targets', label:'My Target List', render: renderTargets},
   {id:'add', label:'Add Targets', render: renderAddTargets},
   {id:'followups', label:'My Follow-Ups', render: renderFollowups},
+  {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
   {id:'activity', label:'Activity Log', render: renderAgentActivity},
   {id:'events', label:'Events Leads', render: renderEvents},
   {id:'cleanup', label:'Contact Cleanup', render: renderContactCleanup},
@@ -1667,11 +1668,11 @@ async function renderBidPipeline(c){
     '</div><div class="filter-bar">'+
       '<div class="field"><label>From Date</label><input type="date" id="bid-from" value="'+esc(f.from)+'"></div>'+
       '<div class="field"><label>To Date</label><input type="date" id="bid-to" value="'+esc(f.to)+'"></div>'+
-      '<div class="field"><label>Agent</label><select id="bid-agent">'+agentOptions(f.agent)+'</select></div>'+
+      '<div class="field"><label>Agent</label>'+(state.user.role==='MANAGER'?'<select id="bid-agent">'+agentOptions(f.agent)+'</select>':'<input id="bid-agent" value="'+esc(state.user.code)+'" disabled>')+'</div>'+
       '<div class="field"><label>Stage</label><select id="bid-stage">'+bidStageOptions(f.stage,true)+'</select></div>'+
       '<button class="btn btn-primary" data-action="bid-apply">Apply / Refresh</button>'+
       '<button class="btn" data-action="bid-new">+ Add Bid</button>'+
-    '</div></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
+    '</div></div><div class="panel"><h2>Bid / Proposal Pipeline</h2><p style="color:var(--muted);font-size:13px">Track BIDDING REQUIREMENT opportunities from identified requirement to proposal prep, submitted, awarded, lost, or no decision.</p></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
   await loadBidPipeline();
 }
 
@@ -1707,7 +1708,7 @@ function bidTable(bids){
     '<td class="nowrap">'+esc(b.updatedAt||b.createdAt||'')+'<br><small style="color:var(--muted)">'+esc(b.updatedBy||b.createdBy||'')+'</small></td>'+
     '<td class="nowrap"><button class="btn btn-sm btn-primary" data-action="bid-stage-modal" data-bid="'+esc(b.bidId)+'" data-title="'+esc(b.bidTitle)+'" data-stage="'+esc(b.bidStage)+'">Update Stage</button> '+
     '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(b.companyId)+'" data-cname="'+esc(b.companyName)+'">History</button> '+
-    '<button class="btn btn-sm btn-danger" data-action="bid-delete" data-bid="'+esc(b.bidId)+'">Delete</button></td></tr>'
+    (state.user.role==='MANAGER' ? '<button class="btn btn-sm btn-danger" data-action="bid-delete" data-bid="'+esc(b.bidId)+'">Delete</button>' : '') + '</td></tr>'
   ).join('')+'</tbody></table></div>';
 }
 
@@ -1722,11 +1723,11 @@ ACTIONS['bid-new']=()=>openBidCreateModal({});
 function openBidCreateModal(prefill){
   prefill=prefill||{};
   openModal(
-    '<div class="modal-head"><h2>Create Bid Opportunity</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-head"><h2>Create Bid / Proposal Opportunity</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
     '<div class="modal-body"><div class="form-grid">'+
       '<div><label>Company ID *</label><input id="bm-company" value="'+esc(prefill.companyId||'')+'" placeholder="Paste company ID"></div>'+
       '<div><label>Related Call ID</label><input id="bm-call" value="'+esc(prefill.callId||'')+'" placeholder="Optional"></div>'+
-      '<div class="full"><label>Bid Title *</label><input id="bm-title" value="'+esc(prefill.bidTitle||'')+'" placeholder="e.g. Booth requirement for trade fair"></div>'+
+      '<div class="full"><label>Bid Title *</label><input id="bm-title" value="'+esc(prefill.bidTitle||'')+'" placeholder="e.g. Booth requirement / activation proposal / supplier accreditation"></div>'+
       '<div><label>Estimated Value (PHP)</label><input id="bm-value" inputmode="decimal" placeholder="Optional"></div>'+
       '<div><label>Submission Deadline</label><input type="date" id="bm-deadline"></div>'+
     '</div></div>'+
