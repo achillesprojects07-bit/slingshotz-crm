@@ -203,7 +203,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4 CONTACT DATA CLEANUP</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4.1 CONTACT DATA CLEANUP</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -223,7 +223,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B4 CONTACT DATA CLEANUP</span>
+      <span class="build-tag" id="app-build-tag">B4.1 CONTACT DATA CLEANUP</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -276,7 +276,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B4 CONTACT DATA CLEANUP';
+const APP_BUILD = 'B4.1 CONTACT DATA CLEANUP';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -637,6 +637,7 @@ const AGENT_TABS = [
   {id:'followups', label:'My Follow-Ups', render: renderFollowups},
   {id:'activity', label:'Activity Log', render: renderAgentActivity},
   {id:'events', label:'Events Leads', render: renderEvents},
+  {id:'cleanup', label:'Contact Cleanup', render: renderContactCleanup},
   {id:'leaderboard', label:'Leaderboard', render: renderLeaderboard}
 ];
 const MANAGER_TABS = [
@@ -1927,44 +1928,141 @@ ACTIONS['demo-reset']=async (el)=>{
 
 
 async function renderContactCleanup(c){
+  const isMgr = state.user.role === 'MANAGER';
   c.innerHTML =
-    '<div class="panel"><div class="section-title"><div><h2>Contact Cleanup</h2>'+
-    '<p style="color:var(--muted);margin-top:2px">Clean phone-number layer for calling. Original COMPANY MASTER phone text is preserved and never erased.</p></div></div>'+
-    '<div class="stats-grid" style="margin-bottom:12px">'+
-      '<div class="stat"><b>1</b><span>Run cleanup after database edits</span></div>'+
-      '<div class="stat"><b>2</b><span>Review invalid / unclear numbers</span></div>'+
-      '<div class="stat"><b>3</b><span>Use clean numbers for Call / QR buttons</span></div>'+
-    '</div>'+
+    '<div class="panel"><div class="section-title"><div><h2>Contact Cleanup</h2>'+ 
+    '<p style="color:var(--muted);margin-top:2px">Phone data health. Agents can review and edit companies with unclear, invalid, or missing numbers. Original COMPANY MASTER phone text is preserved and never erased.</p></div></div>'+ 
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
-      '<button class="btn btn-primary" data-action="phone-sync">Run Phone Cleanup</button>'+
-      '<button class="btn" data-action="phone-report">View Cleanup Report</button>'+
-      '<button class="btn" data-action="phone-review">Review Invalid / Needs Review Numbers</button>'+
-    '</div><div id="phone-report-box">'+loadingHtml('Loading cleanup report…')+'</div></div>'+
-    '<div class="panel"><h2>What this does</h2>'+
-    '<p style="color:var(--muted);margin-bottom:8px">This scans PHONE, MOBILE and OTHER CONTACTS, extracts callable numbers, and writes them to COMPANY CONTACT NUMBERS. It keeps the messy original text as reference so contact names, branches and local numbers are not lost.</p>'+
-    '<p style="color:var(--muted)">When agents mark WRONG NUMBER or NUMBER UNREACHABLE, those companies should be checked here and through Edit Company / View Numbers.</p></div>';
+      (isMgr ? '<button class="btn btn-primary" data-action="phone-sync">Run Phone Cleanup</button>' : '')+
+      '<button class="btn" data-action="phone-report">Refresh Report</button>'+ 
+    '</div><div id="phone-report-box">'+loadingHtml('Loading cleanup report…')+'</div></div>'+ 
+    '<div class="panel"><h2>Correct process</h2>'+ 
+    '<p style="color:var(--muted);margin-bottom:8px"><b>Managers</b> run the full phone cleanup after database edits. <b>Agents</b> review and edit companies under Needs Review, Invalid Numbers, and Companies with No Number.</p>'+ 
+    '<p style="color:var(--muted)">Click a card above to open the matching companies, then use Edit Company to correct Phone, Mobile, Primary Contact, or Other Contacts.</p></div>';
   try{ renderPhoneStats(await api('getPhoneCleanupReport',{})); }
   catch(e){ const box=$('#phone-report-box'); if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
 }
 
 function renderPhoneStats(stats){
   const box=$('#phone-report-box'); if(!box) return;
+  const isMgr = state.user && state.user.role === 'MANAGER';
   const items=[
-    ['Companies scanned', stats.companiesScanned!==undefined?stats.companiesScanned:stats.totalCompanies],
-    ['Numbers extracted', stats.numbersExtracted!==undefined?stats.numbersExtracted:stats.totalNumbers],
-    ['Valid numbers', stats.validNumbers],
-    ['Needs review', stats.reviewNumbers],
-    ['Invalid numbers', stats.invalidNumbers],
-    ['Duplicates skipped', stats.duplicateNumbersSkipped],
-    ['Companies w/ multiple numbers', stats.companiesWithMultipleNumbers],
-    ['Companies with no number', stats.companiesWithNoNumber]
-  ].filter(x=>x[1]!==undefined);
-  box.innerHTML='<div class="stats-grid">'+items.map(x=>'<div class="stat"><b>'+x[1]+'</b><span>'+x[0]+'</span></div>').join('')+'</div>';
+    {key:'scanned', label:'Companies scanned', value:stats.companiesScanned!==undefined?stats.companiesScanned:stats.totalCompanies, clickable:false},
+    {key:'extracted', label:'Numbers extracted', value:stats.numbersExtracted!==undefined?stats.numbersExtracted:stats.totalNumbers, clickable:false},
+    {key:'valid', label:'Valid numbers', value:stats.validNumbers, clickable:false},
+    {key:'review', label:'Needs review', value:stats.reviewNumbers, clickable:true},
+    {key:'invalid', label:'Invalid numbers', value:stats.invalidNumbers, clickable:true},
+    {key:'multi', label:'Companies w/ multiple numbers', value:stats.companiesWithMultipleNumbers, clickable:true},
+    {key:'none', label:'Companies with no number', value:stats.companiesWithNoNumber, clickable:true}
+  ].filter(x=>x.value!==undefined);
+  box.innerHTML =
+    '<div class="stats-grid">'+items.map(x=>{
+      const action = x.clickable ? ' data-action="phone-card" data-kind="'+esc(x.key)+'" title="Click to review" style="cursor:pointer"' : '';
+      const hint = x.clickable ? '<small style="display:block;color:var(--brand);font-weight:700;margin-top:4px">Click to review</small>' : '';
+      return '<div class="stat"'+action+'><b>'+esc(x.value)+'</b><span>'+esc(x.label)+'</span>'+hint+'</div>';
+    }).join('')+'</div>'+ 
+    '<div id="phone-review-box" style="margin-top:14px"></div>';
 }
 
+function ensureQueueLoaded(){
+  if(state.queue) return Promise.resolve(state.queue);
+  return api('getCallQueue', {user: state.user.code}).then(q=>{ state.queue=q; return q; });
+}
+
+function companyById(cid){
+  return state.queue && state.queue.companies.find(co=>String(co.companyId)===String(cid));
+}
+
+function phoneCompanyActionButtons(companyId, companyName){
+  return '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">'+
+    '<button class="btn btn-sm btn-primary" data-action="cleanup-edit" data-cid="'+esc(companyId)+'">Edit Company</button>'+ 
+    '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName||'')+'">View History</button>'+ 
+    '<button class="btn btn-sm" data-action="view-numbers" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName||'')+'">View Numbers</button>'+ 
+  '</div>';
+}
+
+function groupedCompaniesFromNumbers(numbers){
+  const map={};
+  (numbers||[]).forEach(n=>{
+    const id=n.companyId||'';
+    if(!map[id]) map[id]={companyId:id, companyName:n.companyName||'', numbers:[]};
+    map[id].numbers.push(n);
+  });
+  return Object.values(map);
+}
+
+function cleanupCompanyCardFromNumberGroup(g){
+  const nums = (g.numbers||[]).map(n=>{
+    const pill = n.validationStatus==='REVIEW'?'pill-retry':(n.validationStatus==='VALID'?'pill-good':'pill-closed');
+    return '<div style="margin-top:6px"><span class="pill '+pill+'">'+esc(n.validationStatus||'')+'</span> '+
+      '<b>'+esc(n.displayNumber||n.dialNumber||'')+'</b>'+(n.extension?' <span class="pill pill-neutral">loc '+esc(n.extension)+'</span>':'')+
+      (n.validationNote?'<div style="color:var(--muted);font-size:12px">'+esc(n.validationNote)+'</div>':'')+
+      '<div class="orig-phone">From '+esc(n.sourceField||'')+': “'+esc(n.originalText||'')+'”</div></div>';
+  }).join('');
+  return '<div class="hist-item"><div class="top"><span><b>'+esc(g.companyName||'Unknown company')+'</b> <small style="color:var(--muted)">'+esc(g.companyId)+'</small></span></div>'+nums+
+    phoneCompanyActionButtons(g.companyId, g.companyName)+'</div>';
+}
+
+function cleanupCompanyCardFromCompany(co, note){
+  return '<div class="hist-item"><div class="top"><span><b>'+esc(co.companyName||'Unknown company')+'</b> <small style="color:var(--muted)">'+esc(co.companyId)+'</small></span>'+ 
+    (co.category?' <span class="pill pill-neutral">'+esc(co.category)+'</span>':'')+'</div>'+ 
+    '<div style="font-size:12.5px;color:var(--muted);margin-top:3px">'+esc(note||'Review company contact details.')+'</div>'+ 
+    '<div style="margin-top:5px">'+(phoneLine(co)||'<div class="no-phone">No clean phone number</div>')+'</div>'+ 
+    (co.originalPhone?'<div class="orig-phone">orig: '+esc(co.originalPhone)+'</div>':'')+
+    (co.phone?'<div class="orig-phone">Phone field: '+esc(co.phone)+'</div>':'')+
+    (co.mobile?'<div class="orig-phone">Mobile field: '+esc(co.mobile)+'</div>':'')+
+    (co.otherContacts?'<div class="orig-phone">Other contacts: '+esc(co.otherContacts)+'</div>':'')+
+    phoneCompanyActionButtons(co.companyId, co.companyName)+'</div>';
+}
+
+ACTIONS['phone-card']=async (el,d)=>{
+  const kind = d.kind;
+  const box = $('#phone-review-box');
+  if(!box) return;
+  box.innerHTML = loadingHtml('Loading review list…');
+  try{
+    if(kind==='review' || kind==='invalid'){
+      const status = kind==='review' ? 'REVIEW' : 'INVALID';
+      const data = await api('getCompanyContactNumbers',{status});
+      const groups = groupedCompaniesFromNumbers(data.numbers||[]);
+      box.innerHTML = '<div class="section-title"><h2>'+(kind==='review'?'Needs Review':'Invalid Numbers')+' ('+groups.length+' companies)</h2></div>'+ 
+        (groups.length ? groups.map(cleanupCompanyCardFromNumberGroup).join('') : emptyHtml('✅','No companies in this bucket.'));
+      return;
+    }
+    const q = await ensureQueueLoaded();
+    let companies=[];
+    if(kind==='none'){
+      companies = (q.companies||[]).filter(co=>!co.hasCleanPhone && (!co.phoneCount || co.phoneValidationStatus==='NONE'));
+      box.innerHTML = '<div class="section-title"><h2>Companies with No Clean Number ('+companies.length+')</h2></div>'+ 
+        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'No clean callable number was extracted. Add or correct Phone / Mobile / Other Contacts.')).join('') : emptyHtml('✅','No companies in this bucket.'));
+      return;
+    }
+    if(kind==='multi'){
+      companies = (q.companies||[]).filter(co=>Number(co.phoneCount||0)>1);
+      box.innerHTML = '<div class="section-title"><h2>Companies with Multiple Numbers ('+companies.length+')</h2></div>'+ 
+        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'Multiple clean numbers exist. Open View Numbers and confirm the best contact number.')).join('') : emptyHtml('✅','No companies in this bucket.'));
+      return;
+    }
+  }catch(e){ box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
+};
+
+ACTIONS['cleanup-edit']=async (el,d)=>{
+  el.disabled=true;
+  try{
+    await ensureQueueLoaded();
+    const co = companyById(d.cid);
+    if(!co){ toast('Company not found in database cache. Reload database and try again.','error'); el.disabled=false; return; }
+    openCompanyModal(co);
+  }catch(e){ toast(e.message,'error'); el.disabled=false; }
+};
+
 ACTIONS['phone-sync']=async (el)=>{
+  if(state.user.role !== 'MANAGER'){
+    toast('Only managers can run the full Phone Cleanup. Agents can edit company details from the review cards.','error');
+    return;
+  }
   if(!confirm('Run phone cleanup across the full company database?\n\nThis scans COMPANY MASTER and rebuilds COMPANY CONTACT NUMBERS. Original phone cells are never changed. It can take a minute.')) return;
-  el.disabled=true; el.textContent='Running cleanup\u2026';
+  el.disabled=true; el.textContent='Running cleanup…';
   try{
     const stats=await api('syncCompanyContactNumbers',{});
     toast('Phone cleanup complete: '+stats.numbersExtracted+' numbers from '+stats.companiesScanned+' companies','success');
@@ -1982,20 +2080,16 @@ ACTIONS['phone-report']=async (el)=>{
 };
 
 ACTIONS['phone-review']=async (el)=>{
-  openModal('<div class="modal-head"><h2>Review Company Details — Invalid / Unclear Numbers</h2><button class="modal-x" data-action="close-modal">\u00D7</button></div>'+
-    '<div class="modal-body"><div id="pr-body">'+loadingHtml('Loading\u2026')+'</div></div>'+
+  const fakeBox = $('#phone-review-box');
+  if(fakeBox){ ACTIONS['phone-card'](el,{kind:'review'}); return; }
+  openModal('<div class="modal-head"><h2>Review Company Details — Invalid / Unclear Numbers</h2><button class="modal-x" data-action="close-modal">×</button></div>'+ 
+    '<div class="modal-body"><div id="pr-body">'+loadingHtml('Loading…')+'</div></div>'+ 
     '<div class="modal-foot"><button class="btn" data-action="close-modal">Close</button></div>');
   try{
     const data=await api('getCompanyContactNumbers',{status:'REVIEW,INVALID'});
+    const groups=groupedCompaniesFromNumbers(data.numbers||[]);
     const box=$('#pr-body'); if(!box) return;
-    box.innerHTML = data.numbers.length ? data.numbers.map(n=>{
-      const pill = n.validationStatus==='REVIEW'?'pill-retry':'pill-closed';
-      return '<div class="hist-item"><div class="top"><span><b>'+esc(n.companyName)+'</b> <small style="color:var(--muted)">'+esc(n.companyId)+'</small></span>'+
-        '<span class="pill '+pill+'">'+esc(n.validationStatus)+'</span></div>'+
-        '<div style="font-weight:700">'+esc(n.displayNumber)+(n.extension?' <span class="pill pill-neutral">loc '+esc(n.extension)+'</span>':'')+'</div>'+
-        (n.validationNote?'<div style="color:var(--muted);font-size:12px">'+esc(n.validationNote)+'</div>':'')+
-        '<div class="orig-phone">From '+esc(n.sourceField)+': \u201C'+esc(n.originalText)+'\u201D</div></div>';
-    }).join('') : emptyHtml('\u2705','No numbers need review. All extracted numbers are valid.');
+    box.innerHTML = groups.length ? groups.map(cleanupCompanyCardFromNumberGroup).join('') : emptyHtml('✅','No numbers need review. All extracted numbers are valid.');
   }catch(e){ const box=$('#pr-body'); if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
 };
 
@@ -2109,7 +2203,7 @@ ACTIONS['call-save']=async (el,d)=>{
   }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Call'; }
 };
 
-/* ===================== COMPANY EDIT MODAL (manager) =================== */
+/* ===================== COMPANY EDIT MODAL =================== */
 
 ACTIONS['edit-company']=(el,d)=>{
   const co=state.queue && state.queue.companies.find(x=>x.companyId===d.cid);
@@ -2169,6 +2263,7 @@ ACTIONS['company-save']=async (el,d)=>{
     toast(r.message,'success');
     closeModal();
     if(state.tab==='add') renderQueueList();
+    if(state.tab==='cleanup') renderTab('cleanup');
   }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Company'; }
 };
 
