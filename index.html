@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B5.4 BID FILTER VISIBILITY FIX</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B6.1 MEETING DASHBOARD CARDS</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B5.4 BID FILTER VISIBILITY FIX</span>
+      <span class="build-tag" id="app-build-tag">B6.1 MEETING DASHBOARD CARDS</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -292,9 +292,10 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B5.4 BID FILTER VISIBILITY FIX';
+const APP_BUILD = 'B6.1 MEETING DASHBOARD CARDS';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
+const MEETING_STATUSES = ['SCHEDULED','PREPARING','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
 
 const state = {
   user: null,            // {code,name,role,canAddEvents,canSwitchLive}
@@ -311,6 +312,7 @@ const state = {
   perfFilters: null,
   trailFilters: null,
   bidFilters: null,
+  meetingFilters: null,
   eventFilters: { search:'', category:'', venue:'', range:'all' },
   cleanupKind: '',
   lastReport: null,      // agent dashboard report cache
@@ -639,7 +641,7 @@ async function doLogin(){
 }
 
 function logout(){
-  state.user=null; state.pin=null; state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null;
+  state.user=null; state.pin=null; state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null;
   $('#app-view').style.display='none';
   $('#login-view').style.display='flex';
 }
@@ -653,6 +655,7 @@ const AGENT_TABS = [
   {id:'add', label:'Add Targets', render: renderAddTargets},
   {id:'followups', label:'My Follow-Ups', render: renderFollowups},
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
+  {id:'meetings', label:'Meetings Booked', render: renderMeetingPipeline},
   {id:'activity', label:'Activity Log', render: renderAgentActivity},
   {id:'events', label:'Events Leads', render: renderEvents},
   {id:'cleanup', label:'Contact Cleanup', render: renderContactCleanup},
@@ -663,6 +666,7 @@ const MANAGER_TABS = [
   {id:'performance', label:'Agent Performance', render: renderPerformance},
   {id:'worktrail', label:'Work Trail', render: renderWorkTrail},
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
+  {id:'meetings', label:'Meetings Booked', render: renderMeetingPipeline},
   {id:'events', label:'Events Leads', render: renderEvents},
   {id:'edithistory', label:'Company Edit History', render: renderEditHistory},
   {id:'cleanup', label:'Contact Cleanup', render: renderContactCleanup},
@@ -697,7 +701,7 @@ $('#mode-switch').addEventListener('click', async ()=>{
   if (next==='LIVE' && !confirm('Switch to LIVE mode?\n\nAll calls, targets and events will be written to the LIVE operational sheets.')) return;
   const prev = state.mode;
   state.mode = next;
-  state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null;
+  state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null;
   updateModeBadge();
   toast('Now in '+next+' mode');
   renderTab(state.tab);
@@ -802,6 +806,7 @@ function renderFunnel(todayCalls, needsActionCount){
 const DASH_CARDS = [
   {key:'completedToday', label:'My Calls Today'},
   {key:'productiveToday', label:'My Productive Calls'},
+  {key:'meetings', label:'My Meetings Booked'},
   {key:'followups', label:'My Follow-Ups Due'},
   {key:'retryToday', label:'My Calls to Retry'},
   {key:'targetProgress', label:'My Target Progress'}
@@ -858,6 +863,7 @@ function agentDashLabel(card){
   if(card.key==='completedToday') return isTodayRange(state.dashFilters) ? 'My Calls Today' : 'My Calls in Range';
   if(card.key==='productiveToday') return isTodayRange(state.dashFilters) ? 'My Productive Calls Today' : 'My Productive Calls in Range';
   if(card.key==='retryToday') return isTodayRange(state.dashFilters) ? 'My Calls to Retry Today' : 'My Calls to Retry in Range';
+  if(card.key==='meetings') return 'My Meetings Booked';
   if(card.key==='followups') return 'My Open Follow-Ups';
   if(card.key==='targetProgress') return 'My Target Progress Today';
   return card.label;
@@ -1564,6 +1570,7 @@ async function loadCommandCenter(){
     const topCards = [
       {key:'calls', label:'Calls Logged', value:rep.kpis.callsLogged||0},
       {key:'meaningful', label:'Productive Calls', value:totalCount(productiveItems)},
+      {key:'meetings', label:'Meetings Set', value:rep.kpis.meetings||0},
       {key:'attention', label:'Needs Manager Action', value:(rep.attention||[]).length},
       {key:'closed', label:'Closed / Not Leads', value:closedTotal},
       {key:'retryCases', label:'Calls to Retry', value:retryTotal},
@@ -1597,7 +1604,7 @@ function renderMgrDrill(){
   const box=$('#cc-drill'), title=$('#cc-drill-title'); if(!box) return;
   const allCalls = (rep.lists && rep.lists.calls) ? rep.lists.calls : [];
   const key = state.mgrKpi || 'calls';
-  const labelMap = {calls:'Calls Logged', meaningful:'Productive Calls', attention:'Needs Manager Action', closed:'Closed / Not Leads', retryCases:'Calls to Retry', invalid:'Invalid Contacts'};
+  const labelMap = {calls:'Calls Logged', meaningful:'Productive Calls', meetings:'Meetings Set', attention:'Needs Manager Action', closed:'Closed / Not Leads', retryCases:'Calls to Retry', invalid:'Invalid Contacts'};
   let rows = [];
   if(key==='attention'){ title.textContent='Needs Manager Action ('+(rep.attention||[]).length+')'; box.innerHTML=attentionList(rep.attention||[]); return; }
   if(key==='meaningful') rows = allCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase()));
@@ -1674,7 +1681,7 @@ async function renderBidPipeline(c){
       '<button class="btn" data-action="bid-clear-filters">Clear Filters</button>'+
       '<button class="btn" data-action="bid-import">Import Bidding Requirements</button>'+
       '<button class="btn" data-action="bid-new">+ Add Bid</button>'+
-    '</div></div><div class="panel"><h2>Bid / Proposal Pipeline</h2><p style="color:var(--muted);font-size:13px">Track BIDDING REQUIREMENT opportunities from identified requirement to proposal prep, submitted, awarded, lost, or no decision. B5.4 imports previous BIDDING REQUIREMENT call logs, auto-creates new ones, and clears hidden date/agent filters when drilling into stage cards.</p></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
+    '</div></div><div class="panel"><h2>Bid / Proposal Pipeline</h2><p style="color:var(--muted);font-size:13px">Track BIDDING REQUIREMENT opportunities from identified requirement to proposal prep, submitted, awarded, lost, or no decision. B6 keeps bid tracking and adds a separate Meetings Booked preparation workflow.</p></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
 
   // B5.2: Stage dropdown filters immediately.
   const st=$('#bid-stage');
@@ -1709,6 +1716,8 @@ async function loadBidPipeline(){
     const byStage = summary.byStage || {};
     const selectedStage = f.stage && f.stage !== 'ALL' ? f.stage : 'ALL';
     const selectedLabel = (selectedStage === 'ALL' ? 'Showing all stages' : 'Filtered to: ' + selectedStage) + ' · Dates: ' + ((f.from||f.to) ? ((f.from||'Start') + ' to ' + (f.to||'Today')) : 'All') + ' · Agent: ' + ((f.agent && f.agent !== 'ALL') ? f.agent : (state.user.role==='MANAGER' ? 'All agents' : state.user.code));
+    const stageTitle = selectedStage === 'ALL' ? 'ALL STAGES' : selectedStage;
+    const pipelineTitle = 'Bid Pipeline — ' + stageTitle + ' (' + data.count + ')';
     body.innerHTML =
       '<div class="panel" style="padding:10px 14px;color:var(--muted);font-weight:700">'+esc(selectedLabel)+'</div>'+
       '<div class="cards">'+
@@ -1718,12 +1727,16 @@ async function loadBidPipeline(){
         '<div class="stat-card" data-action="bid-filter-stage" data-stage="AWARDED" title="Show awarded bids"><div class="num">'+(summary.avgDaysToAward==null?'—':summary.avgDaysToAward)+'</div><div class="lbl">Avg Days to Award<br><span style="color:var(--brand);font-weight:800">Click awarded</span></div></div>'+
       '</div>'+
       '<div class="panel"><h2>Stage Summary</h2><p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Click any stage to filter the bid list below, or use the Stage dropdown above.</p><div class="stats-grid">'+BID_STAGES.map(s=>'<div class="stat" style="cursor:pointer;'+(selectedStage===s?'border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft) inset;':'')+'" data-action="bid-filter-stage" data-stage="'+esc(s)+'"><b>'+(byStage[s]||0)+'</b><span>'+esc(s)+'</span><br><small style="color:var(--brand);font-weight:800">Click to review</small></div>').join('')+'</div></div>'+
-      '<div class="panel"><div class="section-title"><h2>Bid Pipeline ('+data.count+')</h2><button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+bidTable(data.bids||[])+'</div>';
+      '<div class="panel"><div class="section-title"><h2>'+esc(pipelineTitle)+'</h2><button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+bidTable(data.bids||[], selectedStage)+'</div>';
   }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
-function bidTable(bids){
-  if(!bids.length) return emptyHtml('📄','No bids match this filter yet.');
+function bidTable(bids, selectedStage){
+  if(!bids.length){
+    const stage = String(selectedStage || 'ALL').toUpperCase();
+    const msg = stage === 'ALL' ? 'No bid opportunities yet.' : 'No ' + stage.toLowerCase() + ' bids yet.';
+    return emptyHtml('📄', msg);
+  }
   return '<div class="table-wrap"><table><thead><tr><th>Bid</th><th>Company</th><th>Agent</th><th>Stage</th><th>Value</th><th>Deadline</th><th>Updated</th><th></th></tr></thead><tbody>'+bids.map(b=>
     '<tr><td><b>'+esc(b.bidTitle)+'</b><br><small style="color:var(--muted)">'+esc(b.bidId)+'</small></td>'+
     '<td><b>'+esc(b.companyName||'')+'</b><br><small style="color:var(--muted)">'+esc(b.companyId||'')+'</small></td>'+
@@ -1833,6 +1846,133 @@ ACTIONS['bid-delete']=async (el,d)=>{
   el.disabled=true;
   try{ await api('deleteBid',{bidId:d.bid}); toast('Bid deleted','success'); renderTab('bids'); }
   catch(e){ toast(e.message,'error'); el.disabled=false; }
+};
+
+
+/* ====================== MEETINGS BOOKED / PREPARATION ====================== */
+
+function meetingStatusPill(status){
+  status = String(status||'').toUpperCase();
+  let cls='pill-neutral';
+  if(status==='SCHEDULED' || status==='PREPARING') cls='pill-meet';
+  else if(status==='DONE') cls='pill-good';
+  else if(status==='RESCHEDULED') cls='pill-retry';
+  else if(status==='CANCELLED' || status==='NO SHOW') cls='pill-closed';
+  return '<span class="pill '+cls+'">'+esc(status||'—')+'</span>';
+}
+
+function meetingStatusOptions(selected, includeAll){
+  selected = String(selected||'').toUpperCase();
+  const head = includeAll ? '<option value="ALL">All statuses</option>' : '';
+  return head + MEETING_STATUSES.map(s=>'<option value="'+esc(s)+'"'+(selected===s?' selected':'')+'>'+esc(s)+'</option>').join('');
+}
+
+async function renderMeetingPipeline(c){
+  await ensureUsers();
+  if(!state.meetingFilters) state.meetingFilters={from:'', to:'', agent:'ALL', status:'ALL'};
+  const f=state.meetingFilters;
+  c.innerHTML='<div class="panel"><div class="quick-ranges">'+
+      '<button class="chip" data-action="mtg-quick" data-q="today">Today</button>'+
+      '<button class="chip" data-action="mtg-quick" data-q="7">Last 7 Days</button>'+
+      '<button class="chip" data-action="mtg-quick" data-q="30">Last 30 Days</button>'+
+      '<button class="chip" data-action="mtg-quick" data-q="month">This Month</button>'+
+      '<button class="chip" data-action="mtg-quick" data-q="all">All</button>'+
+    '</div><div class="filter-bar">'+
+      '<div class="field"><label>From Date</label><input type="date" id="mtg-from" value="'+esc(f.from)+'"></div>'+
+      '<div class="field"><label>To Date</label><input type="date" id="mtg-to" value="'+esc(f.to)+'"></div>'+
+      '<div class="field"><label>Agent</label>'+(state.user.role==='MANAGER'?'<select id="mtg-agent">'+agentOptions(f.agent)+'</select>':'<input id="mtg-agent" value="'+esc(state.user.code)+'" disabled>')+'</div>'+
+      '<div class="field"><label>Status</label><select id="mtg-status">'+meetingStatusOptions(f.status,true)+'</select></div>'+
+      '<button class="btn btn-primary" data-action="mtg-apply">Apply / Refresh</button>'+
+      '<button class="btn" data-action="mtg-clear">Clear Filters</button>'+
+      '<button class="btn" data-action="mtg-import">Import Meeting Calls</button>'+
+    '</div></div><div class="panel"><h2>Meetings Booked</h2><p style="color:var(--muted);font-size:13px">Meeting calls are tracked separately from ordinary follow-ups. Use this area to prepare, reschedule, mark done, or set the next action after the meeting.</p></div><div id="mtg-body">'+loadingHtml('Loading meetings…')+'</div>';
+  const st=$('#mtg-status');
+  if(st){ st.addEventListener('change',()=>{ state.meetingFilters.status = st.value || 'ALL'; loadMeetingPipeline(); }); }
+  await loadMeetingPipeline();
+}
+
+async function loadMeetingPipeline(){
+  const f=state.meetingFilters;
+  const body=$('#mtg-body'); if(!body) return;
+  try{
+    const statusEl=$('#mtg-status'), agentEl=$('#mtg-agent'), fromEl=$('#mtg-from'), toEl=$('#mtg-to');
+    if(statusEl) f.status=statusEl.value || 'ALL';
+    if(agentEl) f.agent=agentEl.value || f.agent || 'ALL';
+    if(fromEl) f.from=fromEl.value || '';
+    if(toEl) f.to=toEl.value || '';
+    const params={fromDate:f.from,toDate:f.to,agent:f.agent,status:f.status};
+    if(params.agent==='ALL') params.agent='';
+    if(params.status==='ALL') params.status='';
+    const summary=await api('getMeetingSummary',{});
+    const data=await api('getMeetingPipeline',params);
+    const byStatus=summary.byStatus || {};
+    const selectedStatus=f.status && f.status!=='ALL' ? f.status : 'ALL';
+    const selectedLabel=(selectedStatus==='ALL'?'Showing all meetings':'Filtered to: '+selectedStatus)+' · Dates: '+((f.from||f.to)?((f.from||'Start')+' to '+(f.to||'Today')):'All')+' · Agent: '+((f.agent&&f.agent!=='ALL')?f.agent:(state.user.role==='MANAGER'?'All agents':state.user.code));
+    const title='Meetings Booked — '+(selectedStatus==='ALL'?'ALL STATUSES':selectedStatus)+' ('+data.count+')';
+    body.innerHTML=
+      '<div class="panel" style="padding:10px 14px;color:var(--muted);font-weight:700">'+esc(selectedLabel)+'</div>'+
+      '<div class="cards">'+
+        '<div class="stat-card" data-action="mtg-filter-all"><div class="num">'+summary.total+'</div><div class="lbl">Total Meetings<br><span style="color:var(--brand);font-weight:800">Click to review</span></div></div>'+
+        '<div class="stat-card" data-action="mtg-filter-status" data-status="SCHEDULED"><div class="num">'+(byStatus.SCHEDULED||0)+'</div><div class="lbl">Scheduled<br><span style="color:var(--brand);font-weight:800">Click scheduled</span></div></div>'+
+        '<div class="stat-card" data-action="mtg-filter-status" data-status="PREPARING"><div class="num">'+(byStatus.PREPARING||0)+'</div><div class="lbl">Preparing<br><span style="color:var(--brand);font-weight:800">Click preparing</span></div></div>'+
+        '<div class="stat-card" data-action="mtg-filter-status" data-status="DONE"><div class="num">'+(byStatus.DONE||0)+'</div><div class="lbl">Done<br><span style="color:var(--brand);font-weight:800">Click done</span></div></div>'+
+      '</div>'+
+      '<div class="panel"><h2>Meeting Status Summary</h2><p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Click a status to filter the meeting list below.</p><div class="stats-grid">'+MEETING_STATUSES.map(s=>'<div class="stat" style="cursor:pointer;'+(selectedStatus===s?'border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft) inset;':'')+'" data-action="mtg-filter-status" data-status="'+esc(s)+'"><b>'+(byStatus[s]||0)+'</b><span>'+esc(s)+'</span><br><small style="color:var(--brand);font-weight:800">Click to review</small></div>').join('')+'</div></div>'+
+      '<div class="panel"><div class="section-title"><h2>'+esc(title)+'</h2><button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+meetingTable(data.meetings||[], selectedStatus)+'</div>';
+  }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
+}
+
+function meetingTable(meetings, selectedStatus){
+  if(!meetings.length){
+    const s=String(selectedStatus||'ALL').toUpperCase();
+    return emptyHtml('🗓️', s==='ALL'?'No meetings booked yet.':'No '+s.toLowerCase()+' meetings yet.');
+  }
+  return '<div class="table-wrap"><table><thead><tr><th>Meeting</th><th>Company</th><th>Agent</th><th>Status</th><th>Meeting Date</th><th>Prep / Notes</th><th>Next Action</th><th></th></tr></thead><tbody>'+meetings.map(m=>
+    '<tr><td><b>'+esc(m.meetingType||'Meeting')+'</b><br><small style="color:var(--muted)">'+esc(m.meetingId)+'</small></td>'+
+    '<td><b>'+esc(m.companyName||'')+'</b><br><small style="color:var(--muted)">'+esc(m.companyId||'')+'</small></td>'+
+    '<td>'+esc(m.agent||'—')+'</td><td>'+meetingStatusPill(m.meetingStatus)+'</td><td class="nowrap">'+esc(m.meetingDate||'—')+'</td>'+
+    '<td><small><b>Prep:</b> '+esc(m.prepNotes||'—')+'<br><b>Result:</b> '+esc(m.meetingNotes||'—')+'</small></td>'+
+    '<td><small>'+esc(m.nextResult||'—')+(m.nextActionDate?'<br>'+esc(m.nextActionDate):'')+'</small></td>'+
+    '<td class="nowrap"><button class="btn btn-sm btn-primary" data-action="mtg-update-modal" data-meeting="'+esc(m.meetingId)+'" data-company="'+esc(m.companyName)+'" data-status="'+esc(m.meetingStatus)+'" data-date="'+esc(m.meetingDate)+'">Update</button> '+
+    '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(m.companyId)+'" data-cname="'+esc(m.companyName)+'">History</button></td></tr>'
+  ).join('')+'</tbody></table></div>';
+}
+
+function clearMeetingFilters(status){ state.meetingFilters={from:'',to:'',agent:'ALL',status:status||'ALL'}; }
+ACTIONS['mtg-apply']=()=>{ const f=state.meetingFilters; f.from=$('#mtg-from').value; f.to=$('#mtg-to').value; f.agent=$('#mtg-agent').value; f.status=$('#mtg-status').value; loadMeetingPipeline(); };
+ACTIONS['mtg-clear']=()=>{ clearMeetingFilters('ALL'); renderMeetingPipeline($('#tab-content')); };
+ACTIONS['mtg-quick']=(el,d)=>{ quickRange(state.meetingFilters,d.q); renderMeetingPipeline($('#tab-content')); };
+ACTIONS['mtg-filter-status']=(el,d)=>{ clearMeetingFilters(d.status||'ALL'); renderMeetingPipeline($('#tab-content')); };
+ACTIONS['mtg-filter-all']=()=>{ clearMeetingFilters('ALL'); renderMeetingPipeline($('#tab-content')); };
+ACTIONS['mtg-import']=async (el)=>{
+  if(!confirm('Import previous meeting-set call logs into Meetings Booked? Existing meeting records will not be duplicated.')) return;
+  el.disabled=true; el.textContent='Importing…';
+  try{ const res=await api('importMeetingCalls',{}); toast('Imported '+(res.created||0)+' meeting(s). Existing skipped: '+(res.skippedExisting||0)+'. Showing SCHEDULED now.','success'); clearMeetingFilters('SCHEDULED'); await renderMeetingPipeline($('#tab-content')); }
+  catch(e){ toast(e.message,'error'); }
+  finally{ el.disabled=false; el.textContent='Import Meeting Calls'; }
+};
+
+ACTIONS['mtg-update-modal']=(el,d)=>{
+  openModal(
+    '<div class="modal-head"><h2>Update Meeting</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-body"><div class="form-grid">'+
+      '<div class="full"><label>Company</label><input value="'+esc(d.company||'')+'" disabled></div>'+
+      '<div><label>Status *</label><select id="mtg-modal-status">'+meetingStatusOptions(String(d.status||'').toUpperCase(),false)+'</select></div>'+
+      '<div><label>Meeting Date</label><input type="date" id="mtg-modal-date" value="'+esc(d.date||'')+'"></div>'+
+      '<div class="full"><label>Preparation Notes</label><textarea id="mtg-modal-prep" rows="3" placeholder="What should be prepared before the meeting?"></textarea></div>'+
+      '<div class="full"><label>Meeting Notes / Result</label><textarea id="mtg-modal-notes" rows="3" placeholder="What happened in the meeting?"></textarea></div>'+
+      '<div><label>Next Result</label><select id="mtg-modal-next"><option value="">No next result yet</option>'+callResultOptions('')+'</select></div>'+
+      '<div><label>Next Action Date</label><input type="date" id="mtg-modal-nextdate"></div>'+
+    '</div></div>'+
+    '<div class="modal-foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="mtg-save" data-meeting="'+esc(d.meeting)+'">Save Meeting</button></div>'
+  );
+};
+ACTIONS['mtg-save']=async (el,d)=>{
+  el.disabled=true; el.textContent='Saving…';
+  try{
+    await api('updateMeetingStatus',{meetingId:d.meeting,newStatus:$('#mtg-modal-status').value,meetingDate:$('#mtg-modal-date').value,prepNotes:$('#mtg-modal-prep').value,meetingNotes:$('#mtg-modal-notes').value,nextResult:$('#mtg-modal-next').value,nextActionDate:$('#mtg-modal-nextdate').value});
+    toast('Meeting updated','success'); closeModal(); renderTab('meetings');
+  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Meeting'; }
 };
 
 /* ==================== MANAGER: AGENT PERFORMANCE ====================== */
@@ -1997,7 +2137,7 @@ ACTIONS['demo-reset']=async (el)=>{
   try{
     const r=await api('resetDemoActivity',{by:state.user.code,confirmToken:'CONFIRM-RESET'});
     toast(r.message,'success');
-    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null;
+    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null;
     renderTab('users');
   }catch(e){ toast(e.message,'error'); }
   el.disabled=false; el.textContent='Reset Demo Data';
@@ -2240,7 +2380,7 @@ ACTIONS['phone-sync']=async (el)=>{
     const stats=await api('syncCompanyContactNumbers',{});
     toast('Phone cleanup complete: '+stats.numbersExtracted+' numbers from '+stats.companiesScanned+' companies','success');
     renderPhoneStats(stats);
-    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; // cards must pick up new numbers
+    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null; // cards must pick up new numbers
   }catch(e){ toast(e.message,'error'); }
   el.disabled=false; el.textContent='Run Phone Cleanup';
 };
