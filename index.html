@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B5 BID PROPOSAL PIPELINE</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B5.2 BID STAGE FILTER FIX</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B5 BID PROPOSAL PIPELINE</span>
+      <span class="build-tag" id="app-build-tag">B5.2 BID STAGE FILTER FIX</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -292,7 +292,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B5 BID PROPOSAL PIPELINE';
+const APP_BUILD = 'B5.2 BID STAGE FILTER FIX';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -1673,6 +1673,16 @@ async function renderBidPipeline(c){
       '<button class="btn btn-primary" data-action="bid-apply">Apply / Refresh</button>'+
       '<button class="btn" data-action="bid-new">+ Add Bid</button>'+
     '</div></div><div class="panel"><h2>Bid / Proposal Pipeline</h2><p style="color:var(--muted);font-size:13px">Track BIDDING REQUIREMENT opportunities from identified requirement to proposal prep, submitted, awarded, lost, or no decision.</p></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
+
+  // B5.2: Stage dropdown filters immediately.
+  const st=$('#bid-stage');
+  if(st){
+    st.addEventListener('change', ()=>{
+      state.bidFilters.stage = st.value || 'ALL';
+      loadBidPipeline();
+    });
+  }
+
   await loadBidPipeline();
 }
 
@@ -1680,20 +1690,32 @@ async function loadBidPipeline(){
   const f=state.bidFilters;
   const body=$('#bid-body'); if(!body) return;
   try{
+    // B5.2: Read live filter values so dropdown and Apply always match what loads.
+    const stageEl=$('#bid-stage');
+    const agentEl=$('#bid-agent');
+    const fromEl=$('#bid-from');
+    const toEl=$('#bid-to');
+    if(stageEl) f.stage = stageEl.value || 'ALL';
+    if(agentEl) f.agent = agentEl.value || f.agent || 'ALL';
+    if(fromEl) f.from = fromEl.value || '';
+    if(toEl) f.to = toEl.value || '';
     const params={fromDate:f.from,toDate:f.to,agent:f.agent,stage:f.stage};
     if(params.agent==='ALL') params.agent='';
     if(params.stage==='ALL') params.stage='';
     const summary = await api('getBidSummary',{});
     const data = await api('getBidPipeline',params);
     const byStage = summary.byStage || {};
+    const selectedStage = f.stage && f.stage !== 'ALL' ? f.stage : 'ALL';
+    const selectedLabel = selectedStage === 'ALL' ? 'Showing all stages' : 'Filtered to: ' + selectedStage;
     body.innerHTML =
+      '<div class="panel" style="padding:10px 14px;color:var(--muted);font-weight:700">'+esc(selectedLabel)+'</div>'+
       '<div class="cards">'+
-        '<div class="stat-card"><div class="num">'+summary.total+'</div><div class="lbl">Total Bids</div></div>'+
-        '<div class="stat-card"><div class="num">'+pesoFmt(summary.pipelineValue)+'</div><div class="lbl">Open Pipeline Value</div></div>'+
-        '<div class="stat-card"><div class="num">'+(summary.winRate==null?'—':summary.winRate+'%')+'</div><div class="lbl">Win Rate</div></div>'+
-        '<div class="stat-card"><div class="num">'+(summary.avgDaysToAward==null?'—':summary.avgDaysToAward)+'</div><div class="lbl">Avg Days to Award</div></div>'+
+        '<div class="stat-card" data-action="bid-filter-all" title="Show all bid opportunities"><div class="num">'+summary.total+'</div><div class="lbl">Total Bids<br><span style="color:var(--brand);font-weight:800">Click to review</span></div></div>'+
+        '<div class="stat-card" data-action="bid-filter-open" title="Show open bid opportunities"><div class="num">'+pesoFmt(summary.pipelineValue)+'</div><div class="lbl">Open Pipeline Value<br><span style="color:var(--brand);font-weight:800">Click to review open</span></div></div>'+
+        '<div class="stat-card" data-action="bid-filter-stage" data-stage="AWARDED" title="Show awarded bids"><div class="num">'+(summary.winRate==null?'—':summary.winRate+'%')+'</div><div class="lbl">Win Rate<br><span style="color:var(--brand);font-weight:800">Click awarded</span></div></div>'+
+        '<div class="stat-card" data-action="bid-filter-stage" data-stage="AWARDED" title="Show awarded bids"><div class="num">'+(summary.avgDaysToAward==null?'—':summary.avgDaysToAward)+'</div><div class="lbl">Avg Days to Award<br><span style="color:var(--brand);font-weight:800">Click awarded</span></div></div>'+
       '</div>'+
-      '<div class="panel"><h2>Stage Summary</h2><div class="stats-grid">'+BID_STAGES.map(s=>'<div class="stat"><b>'+(byStage[s]||0)+'</b><span>'+esc(s)+'</span></div>').join('')+'</div></div>'+
+      '<div class="panel"><h2>Stage Summary</h2><p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Click any stage to filter the bid list below, or use the Stage dropdown above.</p><div class="stats-grid">'+BID_STAGES.map(s=>'<div class="stat" style="cursor:pointer;'+(selectedStage===s?'border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft) inset;':'')+'" data-action="bid-filter-stage" data-stage="'+esc(s)+'"><b>'+(byStage[s]||0)+'</b><span>'+esc(s)+'</span><br><small style="color:var(--brand);font-weight:800">Click to review</small></div>').join('')+'</div></div>'+
       '<div class="panel"><div class="section-title"><h2>Bid Pipeline ('+data.count+')</h2><button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+bidTable(data.bids||[])+'</div>';
   }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
@@ -1715,9 +1737,25 @@ function bidTable(bids){
 ACTIONS['bid-apply']=()=>{
   const f=state.bidFilters;
   f.from=$('#bid-from').value; f.to=$('#bid-to').value; f.agent=$('#bid-agent').value; f.stage=$('#bid-stage').value;
-  renderBidPipeline($('#tab-content'));
+  loadBidPipeline();
 };
 ACTIONS['bid-quick']=(el,d)=>{ quickRange(state.bidFilters,d.q); renderBidPipeline($('#tab-content')); };
+ACTIONS['bid-filter-stage']=(el,d)=>{
+  if(!state.bidFilters) state.bidFilters={from:'', to:'', agent:'ALL', stage:'ALL'};
+  state.bidFilters.stage = d.stage || 'ALL';
+  renderBidPipeline($('#tab-content'));
+};
+ACTIONS['bid-filter-all']=()=>{
+  if(!state.bidFilters) state.bidFilters={from:'', to:'', agent:'ALL', stage:'ALL'};
+  state.bidFilters.stage = 'ALL';
+  renderBidPipeline($('#tab-content'));
+};
+ACTIONS['bid-filter-open']=()=>{
+  if(!state.bidFilters) state.bidFilters={from:'', to:'', agent:'ALL', stage:'ALL'};
+  state.bidFilters.stage = 'ALL';
+  renderBidPipeline($('#tab-content'));
+  toast('Open value includes IDENTIFIED, QUALIFYING, PROPOSAL PREP, and SUBMITTED. Use the stage cards to drill down.','success');
+};
 ACTIONS['bid-new']=()=>openBidCreateModal({});
 
 function openBidCreateModal(prefill){
