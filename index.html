@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B8.6 FRONTEND SAVE CALL BUTTON FIX</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B8.7 DIRECT SAVE CALL FIX</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B8.6 FRONTEND SAVE CALL BUTTON FIX</span>
+      <span class="build-tag" id="app-build-tag">B8.7 DIRECT SAVE CALL FIX</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -293,7 +293,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B8.6 FRONTEND SAVE CALL BUTTON FIX';
+const APP_BUILD = 'B8.7 DIRECT SAVE CALL FIX';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -2609,51 +2609,91 @@ ACTIONS['bid-from-call']=(el,d)=>{
   openBidCreateModal({companyId:d.cid, callId:d.call, bidTitle:title});
 };
 
+
 ACTIONS['call-save']=async (el,d)=>{
   const resultEl=$('#cm-result');
   const dateEl=$('#cm-fudate');
   const errBox=$('#cm-save-error');
-  const result=resultEl ? resultEl.value : '';
+  const result=String(resultEl ? resultEl.value : '').toUpperCase().trim();
   const followUpDate=dateEl ? dateEl.value : '';
   if(errBox){ errBox.style.display='none'; errBox.innerHTML=''; }
+
   if(!result){ toast('Please select a call result','error'); return; }
   if(MEETING.has(result) && !followUpDate){ toast('Meeting Date is required for meeting set results','error'); return; }
-  if(FOLLOWUP_RESULTS_FRONT.has(result) && !followUpDate){ toast('Follow-Up Date is required for follow-up results','error'); return; }
+  if(FOLLOWUP_RESULTS_FRONT.has(result) && !followUpDate){ toast('Follow-Up Date is required for this result','error'); return; }
 
   const originalText = el.textContent;
   el.disabled=true; el.textContent='Saving…';
+
+  const payload={
+    action:'logCall',
+    mode: state.mode || 'DEMO',
+    user: state.user && state.user.code ? state.user.code : '',
+    by: state.user && state.user.code ? state.user.code : '',
+    pin: state.pin || '',
+    companyId: d.cid || '',
+    companyName: d.cname || '',
+    result: result,
+    callResult: result,
+    followUpDate: followUpDate,
+    meetingDate: MEETING.has(result) ? followUpDate : '',
+    nextFollowUpDate: followUpDate,
+    clientEventName: ($('#cm-evname') ? $('#cm-evname').value.trim() : ''),
+    clientEventDate: ($('#cm-evdate') ? $('#cm-evdate').value : ''),
+    notes: ($('#cm-notes') ? $('#cm-notes').value.trim() : ''),
+    _ts: String(Date.now())
+  };
+
+  const directUrl = API_URL + '?' + new URLSearchParams(payload).toString();
+
   try{
-    const payload={
-      user: state.user.code,
-      companyId: d.cid,
-      companyName: d.cname,
-      result: result,
-      followUpDate: followUpDate,
-      clientEventName: ($('#cm-evname') ? $('#cm-evname').value.trim() : ''),
-      clientEventDate: ($('#cm-evdate') ? $('#cm-evdate').value : ''),
-      notes: ($('#cm-notes') ? $('#cm-notes').value.trim() : '')
-    };
-    const saved = await withTimeout(
-      api('logCall', payload),
-      20000,
-      'Saving the call is taking too long. The app stopped waiting so the agent can try again.'
-    );
+    if(!payload.user || !payload.by || !payload.pin){
+      throw new Error('Missing logged-in user or PIN. Please logout and login again.');
+    }
+    console.log('B8.7 Save Call payload', payload);
+    const controller = new AbortController();
+    const timer = setTimeout(()=>controller.abort(), 20000);
+    let res, txt, data;
+    try{
+      res = await fetch(directUrl, { signal: controller.signal, cache: 'no-store' });
+      txt = await res.text();
+    }finally{
+      clearTimeout(timer);
+    }
+    try{
+      data = JSON.parse(txt);
+    }catch(parseErr){
+      throw new Error('Backend did not return JSON while saving. Raw response: ' + String(txt||'').slice(0,250));
+    }
+    if(!data.ok){
+      throw new Error(data.error || data.message || 'Backend rejected the call save.');
+    }
+
     const isMeeting = result==='COMPANY PROFILE MEETING SET' || result==='PROJECT BRIEFING MEETING SET';
-    if(isMeeting && saved.meetingAlert && saved.meetingAlert.sent){
+    if(isMeeting && data.meetingAlert && data.meetingAlert.sent){
       toast('Meeting logged — manager email alert sent','success');
     }else{
-      toast(saved.message || 'Call logged','success');
+      toast(data.message || 'Call logged','success');
     }
     closeModal();
-    state.lastReport=null; state.lastMgrReport=null;
+    state.lastReport=null; state.lastMgrReport=null; state.queue=null;
     renderTab(state.tab);
   }catch(e){
-    const msg=e && e.message ? e.message : String(e || 'Call save failed.');
-    if(errBox){ errBox.style.display='block'; errBox.innerHTML='⚠ '+esc(msg); }
+    const msg=e && e.name === 'AbortError'
+      ? 'Save timed out after 20 seconds. The backend may still save it. Check the sheet before trying again.'
+      : (e && e.message ? e.message : String(e || 'Call save failed.'));
+    if(errBox){
+      errBox.style.display='block';
+      errBox.innerHTML='⚠ '+esc(msg)+
+        '<br><br><b>Direct save URL for testing:</b><br>'+ 
+        '<a href="'+esc(directUrl)+'" target="_blank" rel="noopener" style="color:var(--brand);word-break:break-all">Open direct save test</a>'+
+        '<br><small style="color:var(--muted)">If this direct URL saves, the backend is okay and the browser fetch is being blocked or interrupted.</small>';
+    }
     toast(msg,'error');
     el.disabled=false; el.textContent=originalText || 'Save Call';
   }
 };
+
 
 /* ===================== COMPANY EDIT MODAL =================== */
 
