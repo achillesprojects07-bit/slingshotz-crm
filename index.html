@@ -153,6 +153,15 @@
   .btn-xs{padding:3px 8px;font-size:11.5px;border-radius:6px}
   .no-phone{color:var(--muted);font-size:11.5px;font-style:italic;margin-top:3px}
   .orig-phone{font-size:11px;color:var(--muted);margin-top:2px;word-break:break-word}
+  .contact-raw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:9px}
+  .contact-raw-box{border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:8px}
+  .contact-raw-box b{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+  .contact-raw-box span{font-size:12.5px;word-break:break-word}
+  .extracted-list{border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:9px;padding:8px}
+  .extracted-list b.head{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px}
+  .extracted-item{border-top:1px solid #eef2f7;padding-top:7px;margin-top:7px;font-size:12.5px}
+  .extracted-item:first-of-type{border-top:0;padding-top:0;margin-top:0}
+  .reason-note{margin-top:7px;color:var(--muted);font-size:12.5px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:7px}
   .btn-viber{background:#7360f2;border-color:#7360f2;color:#fff}
   .btn-viber:hover{background:#5f4dd0}
   .qr-box{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
@@ -203,7 +212,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4.1 CONTACT DATA CLEANUP</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4.2 CONTACT REVIEW DETAILS</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -223,7 +232,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B4.1 CONTACT DATA CLEANUP</span>
+      <span class="build-tag" id="app-build-tag">B4.2 CONTACT REVIEW DETAILS</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -276,7 +285,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B4.1 CONTACT DATA CLEANUP';
+const APP_BUILD = 'B4.2 CONTACT REVIEW DETAILS';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -1991,29 +2000,76 @@ function groupedCompaniesFromNumbers(numbers){
   return Object.values(map);
 }
 
-function cleanupCompanyCardFromNumberGroup(g){
-  const nums = (g.numbers||[]).map(n=>{
-    const pill = n.validationStatus==='REVIEW'?'pill-retry':(n.validationStatus==='VALID'?'pill-good':'pill-closed');
-    return '<div style="margin-top:6px"><span class="pill '+pill+'">'+esc(n.validationStatus||'')+'</span> '+
-      '<b>'+esc(n.displayNumber||n.dialNumber||'')+'</b>'+(n.extension?' <span class="pill pill-neutral">loc '+esc(n.extension)+'</span>':'')+
-      (n.validationNote?'<div style="color:var(--muted);font-size:12px">'+esc(n.validationNote)+'</div>':'')+
-      '<div class="orig-phone">From '+esc(n.sourceField||'')+': “'+esc(n.originalText||'')+'”</div></div>';
-  }).join('');
-  return '<div class="hist-item"><div class="top"><span><b>'+esc(g.companyName||'Unknown company')+'</b> <small style="color:var(--muted)">'+esc(g.companyId)+'</small></span></div>'+nums+
-    phoneCompanyActionButtons(g.companyId, g.companyName)+'</div>';
+
+function rawContactDetailsHtml(co, reason, numbers){
+  co = co || {};
+  numbers = numbers || [];
+  const phoneRaw = co.originalPhone || co.phone || '';
+  const mobileRaw = co.mobile || '';
+  const otherRaw = co.otherContacts || '';
+  const contactRaw = [co.primaryContact, co.title].filter(Boolean).join(' · ');
+  const rows = [
+    {label:'Reason', value:reason || 'Review company contact details.'},
+    {label:'Original Phone Text', value:phoneRaw || 'Blank'},
+    {label:'Original Mobile Text', value:mobileRaw || 'Blank'},
+    {label:'Other Contacts', value:otherRaw || 'Blank'},
+    {label:'Primary Contact / Title', value:contactRaw || 'Blank'},
+    {label:'Email', value:co.email || 'Blank'}
+  ];
+  return '<div class="contact-raw-grid">'+rows.map(r=>
+    '<div class="contact-raw-box"><b>'+esc(r.label)+'</b><span>'+esc(r.value)+'</span></div>'
+  ).join('')+'</div>'+extractedNumbersHtml(numbers);
 }
 
-function cleanupCompanyCardFromCompany(co, note){
+function extractedNumbersHtml(numbers){
+  numbers = numbers || [];
+  if(!numbers.length){
+    return '<div class="extracted-list"><b class="head">Extracted Numbers</b><div class="no-phone">No number was extracted into the clean-number layer. Check Original Phone Text, Original Mobile Text, and Other Contacts above.</div></div>';
+  }
+  return '<div class="extracted-list"><b class="head">Extracted Numbers</b>'+numbers.map(n=>{
+    const status = String(n.validationStatus||'').toUpperCase();
+    const pill = status==='REVIEW'?'pill-retry':(status==='VALID'?'pill-good':'pill-closed');
+    const shown = n.displayNumber || n.dialNumber || n.normalizedNumber || n.rawNumber || '';
+    return '<div class="extracted-item"><span class="pill '+pill+'">'+esc(status||'UNKNOWN')+'</span> '+
+      '<b>'+esc(shown||'—')+'</b>'+(n.extension?' <span class="pill pill-neutral">loc '+esc(n.extension)+'</span>':'')+
+      (n.validationNote?'<div style="color:var(--muted);margin-top:3px">Reason: '+esc(n.validationNote)+'</div>':'')+
+      '<div class="orig-phone">Source '+esc(n.sourceField||'')+': “'+esc(n.originalText||'')+'”</div></div>';
+  }).join('')+'</div>';
+}
+
+function numberGroupsByCompany(numbers){
+  const map = {};
+  (numbers||[]).forEach(n=>{
+    const id = String(n.companyId||'');
+    if(!id) return;
+    if(!map[id]) map[id]=[];
+    map[id].push(n);
+  });
+  return map;
+}
+
+function cleanupCompanyCardFromNumberGroup(g){
+  const co = companyById(g.companyId) || {companyId:g.companyId, companyName:g.companyName};
+  const nums = (g.numbers||[]);
+  const statusSet = Array.from(new Set(nums.map(n=>String(n.validationStatus||'').toUpperCase()).filter(Boolean))).join(', ');
+  const reason = statusSet==='REVIEW' ? 'Extracted number exists but needs human review before calling.' :
+    (statusSet==='INVALID' ? 'Extracted number failed validation. Check the original text and correct the company record.' :
+    'Review extracted numbers and original contact text.');
+  return '<div class="hist-item"><div class="top"><span><b>'+esc(g.companyName||co.companyName||'Unknown company')+'</b> <small style="color:var(--muted)">'+esc(g.companyId)+'</small></span></div>'+ 
+    rawContactDetailsHtml(co, reason, nums)+
+    phoneCompanyActionButtons(g.companyId, g.companyName||co.companyName)+'</div>';
+}
+
+function cleanupCompanyCardFromCompany(co, note, numbers){
+  numbers = numbers || [];
   return '<div class="hist-item"><div class="top"><span><b>'+esc(co.companyName||'Unknown company')+'</b> <small style="color:var(--muted)">'+esc(co.companyId)+'</small></span>'+ 
     (co.category?' <span class="pill pill-neutral">'+esc(co.category)+'</span>':'')+'</div>'+ 
-    '<div style="font-size:12.5px;color:var(--muted);margin-top:3px">'+esc(note||'Review company contact details.')+'</div>'+ 
+    '<div class="reason-note">'+esc(note||'Review company contact details.')+'</div>'+ 
     '<div style="margin-top:5px">'+(phoneLine(co)||'<div class="no-phone">No clean phone number</div>')+'</div>'+ 
-    (co.originalPhone?'<div class="orig-phone">orig: '+esc(co.originalPhone)+'</div>':'')+
-    (co.phone?'<div class="orig-phone">Phone field: '+esc(co.phone)+'</div>':'')+
-    (co.mobile?'<div class="orig-phone">Mobile field: '+esc(co.mobile)+'</div>':'')+
-    (co.otherContacts?'<div class="orig-phone">Other contacts: '+esc(co.otherContacts)+'</div>':'')+
+    rawContactDetailsHtml(co, note, numbers)+
     phoneCompanyActionButtons(co.companyId, co.companyName)+'</div>';
 }
+
 
 ACTIONS['phone-card']=async (el,d)=>{
   const kind = d.kind;
@@ -2022,6 +2078,7 @@ ACTIONS['phone-card']=async (el,d)=>{
   box.innerHTML = loadingHtml('Loading review list…');
   try{
     if(kind==='review' || kind==='invalid'){
+      await ensureQueueLoaded();
       const status = kind==='review' ? 'REVIEW' : 'INVALID';
       const data = await api('getCompanyContactNumbers',{status});
       const groups = groupedCompaniesFromNumbers(data.numbers||[]);
@@ -2034,13 +2091,15 @@ ACTIONS['phone-card']=async (el,d)=>{
     if(kind==='none'){
       companies = (q.companies||[]).filter(co=>!co.hasCleanPhone && (!co.phoneCount || co.phoneValidationStatus==='NONE'));
       box.innerHTML = '<div class="section-title"><h2>Companies with No Clean Number ('+companies.length+')</h2></div>'+ 
-        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'No clean callable number was extracted. Add or correct Phone / Mobile / Other Contacts.')).join('') : emptyHtml('✅','No companies in this bucket.'));
+        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'No clean callable number was extracted. Check the original fields shown below, then add or correct Phone / Mobile / Other Contacts.', [])).join('') : emptyHtml('✅','No companies in this bucket.'));
       return;
     }
     if(kind==='multi'){
+      const numsData = await api('getCompanyContactNumbers',{});
+      const numsByCompany = numberGroupsByCompany(numsData.numbers||[]);
       companies = (q.companies||[]).filter(co=>Number(co.phoneCount||0)>1);
       box.innerHTML = '<div class="section-title"><h2>Companies with Multiple Numbers ('+companies.length+')</h2></div>'+ 
-        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'Multiple clean numbers exist. Open View Numbers and confirm the best contact number.')).join('') : emptyHtml('✅','No companies in this bucket.'));
+        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'Multiple numbers were extracted. Review the extracted list and original fields, then correct or clarify the company record if needed.', numsByCompany[String(co.companyId)]||[])).join('') : emptyHtml('✅','No companies in this bucket.'));
       return;
     }
   }catch(e){ box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
@@ -2229,6 +2288,7 @@ function openCompanyModal(co){
       '<div><label>Email</label><input id="com-email" value="'+esc(co.email)+'"></div>'+
       '<div><label>Phone</label><input id="com-phone" value="'+esc(co.phone)+'"></div>'+
       '<div><label>Mobile</label><input id="com-mobile" value="'+esc(co.mobile)+'"></div>'+
+      '<div class="full"><div class="reason-note"><b>Do not delete useful source notes.</b> Keep branch names, contact names, loc./extension details, and unclear numbers here if they may help the team later.</div></div>'+
       '<div class="full"><label>Other Contacts</label><input id="com-other" value="'+esc(co.otherContacts)+'"></div>'+
       '<div class="full"><label>Events Participated</label><input id="com-events" value="'+esc(co.eventsParticipated)+'"></div>'+
       '<div class="full"><label>Possible Requirements</label><input id="com-req" value="'+esc(co.possibleRequirements)+'"></div>'+
