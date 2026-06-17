@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B8.4 CALL SAVE HISTORY FIX</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B8.5 CALL LOG SAVE STABILITY</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B8.4 CALL SAVE HISTORY FIX</span>
+      <span class="build-tag" id="app-build-tag">B8.5 CALL LOG SAVE STABILITY</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -292,7 +292,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B8.4 CALL SAVE HISTORY FIX';
+const APP_BUILD = 'B8.5 CALL LOG SAVE STABILITY';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -2534,24 +2534,23 @@ ACTIONS['view-history']=(el,d)=>openCallModal(d.cid,d.cname,true);
 
 async function openCallModal(companyId, companyName, historyOnly){
   openModal(
-    '<div class="modal-head"><h2>'+(historyOnly?'Call History':'Log Call')+' — '+esc(companyName)+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-head"><h2>'+(historyOnly?'Call History':'Log Call')+' — '+esc(companyName)+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+ 
     '<div class="modal-body">'+
-    (historyOnly?'':
+    (historyOnly ?
+      '<h3 style="margin-bottom:9px">Previous Call History</h3><div id="cm-history">'+loadingHtml('Loading history…')+'</div>' :
       '<div class="form-grid">'+
-        '<div class="full"><label>Call Result *</label><select id="cm-result"><option value="">Select result…</option>'+
-          callResultOptions()+'</select></div>'+
-        '<div><label id="cm-date-label">Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+
-        '<div class="full"><small id="cm-date-help" style="color:var(--muted)">Follow-up date is required for follow-up results. Meeting date is required for meeting-set results.</small></div>'+
-        '<div><label>Client Event Date</label><input type="date" id="cm-evdate"></div>'+
-        '<div class="full"><label>Client Event Name</label><input id="cm-evname" placeholder="e.g. Product launch, trade show booth…"></div>'+
-        '<div class="full"><label>Notes</label><textarea id="cm-notes" rows="3" placeholder="What happened on the call?"></textarea></div>'+
-      '</div><hr style="border:0;border-top:1px solid var(--line);margin:16px 0">')+
-    '<h3 style="margin-bottom:9px">Previous Call History</h3>'+
-    '<div id="cm-history">'+(historyOnly ? loadingHtml('Loading history…') :
-      '<div class="empty"><div class="big">📞</div>History is optional. You can save the call now, or load history if needed.<br><br><button class="btn btn-sm" data-action="load-history" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Load Previous History</button></div>')+'</div>'+
-    '</div>'+
-    '<div class="modal-foot"><button class="btn" data-action="close-modal">'+(historyOnly?'Close':'Cancel')+'</button>'+
-    (historyOnly?'':'<button class="btn btn-primary" data-action="call-save" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Save Call</button>')+
+        '<div class="full"><label>Call Result *</label><select id="cm-result"><option value="">Select result…</option>'+callResultOptions()+'</select></div>'+ 
+        '<div><label id="cm-date-label">Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+ 
+        '<div class="full"><small id="cm-date-help" style="color:var(--muted)">Follow-up date is required for follow-up results. Meeting date is required for meeting-set results.</small></div>'+ 
+        '<div><label>Client Event Date</label><input type="date" id="cm-evdate"></div>'+ 
+        '<div class="full"><label>Client Event Name</label><input id="cm-evname" placeholder="e.g. Product launch, trade show booth…"></div>'+ 
+        '<div class="full"><label>Notes</label><textarea id="cm-notes" rows="3" placeholder="What happened on the call?"></textarea></div>'+ 
+        '<div class="full"><div id="cm-save-error" class="error-box" style="display:none;text-align:left;margin-top:4px"></div></div>'+ 
+      '</div>'+ 
+      '<div style="margin-top:14px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#f8fafc;color:var(--muted);font-size:13px">Previous history will not auto-load while saving. Use View History only when needed.</div>')+
+    '</div>'+ 
+    '<div class="modal-foot"><button class="btn" data-action="close-modal">'+(historyOnly?'Close':'Cancel')+'</button>'+ 
+    (historyOnly?'':'<button class="btn" data-action="view-history" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">View History</button><button class="btn btn-primary" data-action="call-save" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Save Call</button>')+
     '</div>'
   );
   const resultSel = $('#cm-result');
@@ -2610,30 +2609,49 @@ ACTIONS['bid-from-call']=(el,d)=>{
 };
 
 ACTIONS['call-save']=async (el,d)=>{
-  const result=$('#cm-result').value;
-  const followUpDate=$('#cm-fudate').value;
+  const resultEl=$('#cm-result');
+  const dateEl=$('#cm-fudate');
+  const errBox=$('#cm-save-error');
+  const result=resultEl ? resultEl.value : '';
+  const followUpDate=dateEl ? dateEl.value : '';
+  if(errBox){ errBox.style.display='none'; errBox.innerHTML=''; }
   if(!result){ toast('Please select a call result','error'); return; }
   if(MEETING.has(result) && !followUpDate){ toast('Meeting Date is required for meeting set results','error'); return; }
   if(FOLLOWUP_RESULTS_FRONT.has(result) && !followUpDate){ toast('Follow-Up Date is required for follow-up results','error'); return; }
+
+  const originalText = el.textContent;
   el.disabled=true; el.textContent='Saving…';
   try{
-    const saved = await withTimeout(api('logCall',{
-      user: state.user.code, companyId: d.cid, companyName: d.cname, result,
-      followUpDate: followUpDate, clientEventName: $('#cm-evname').value.trim(),
-      clientEventDate: $('#cm-evdate').value, notes: $('#cm-notes').value.trim()
-    }), 15000, 'Saving the call is taking too long. Please try again. If it keeps happening, test the backend logCall route.');
+    const payload={
+      user: state.user.code,
+      companyId: d.cid,
+      companyName: d.cname,
+      result: result,
+      followUpDate: followUpDate,
+      clientEventName: ($('#cm-evname') ? $('#cm-evname').value.trim() : ''),
+      clientEventDate: ($('#cm-evdate') ? $('#cm-evdate').value : ''),
+      notes: ($('#cm-notes') ? $('#cm-notes').value.trim() : '')
+    };
+    const saved = await withTimeout(
+      api('logCall', payload),
+      20000,
+      'Saving the call is taking too long. The app stopped waiting so the agent can try again.'
+    );
     const isMeeting = result==='COMPANY PROFILE MEETING SET' || result==='PROJECT BRIEFING MEETING SET';
     if(isMeeting && saved.meetingAlert && saved.meetingAlert.sent){
       toast('Meeting logged — manager email alert sent','success');
-    }else if(isMeeting && saved.meetingAlert && saved.meetingAlert.reason){
-      toast('Meeting logged — add manager emails in Users / Settings to send alerts','success');
     }else{
-      toast('Call logged','success');
+      toast(saved.message || 'Call logged','success');
     }
     closeModal();
     state.lastReport=null; state.lastMgrReport=null;
-    renderTab(state.tab); // reload whatever list the user is looking at
-  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Call'; }
+    renderTab(state.tab);
+  }catch(e){
+    const msg=e && e.message ? e.message : String(e || 'Call save failed.');
+    if(errBox){ errBox.style.display='block'; errBox.innerHTML='⚠ '+esc(msg); }
+    toast(msg,'error');
+    el.disabled=false; el.textContent=originalText || 'Save Call';
+  }
 };
 
 /* ===================== COMPANY EDIT MODAL =================== */
