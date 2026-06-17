@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B5.3 BID IMPORT AUTO-CREATE</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B5.4 BID FILTER VISIBILITY FIX</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B5.3 BID IMPORT AUTO-CREATE</span>
+      <span class="build-tag" id="app-build-tag">B5.4 BID FILTER VISIBILITY FIX</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -292,7 +292,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B5.3 BID IMPORT AUTO-CREATE';
+const APP_BUILD = 'B5.4 BID FILTER VISIBILITY FIX';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -1671,9 +1671,10 @@ async function renderBidPipeline(c){
       '<div class="field"><label>Agent</label>'+(state.user.role==='MANAGER'?'<select id="bid-agent">'+agentOptions(f.agent)+'</select>':'<input id="bid-agent" value="'+esc(state.user.code)+'" disabled>')+'</div>'+
       '<div class="field"><label>Stage</label><select id="bid-stage">'+bidStageOptions(f.stage,true)+'</select></div>'+
       '<button class="btn btn-primary" data-action="bid-apply">Apply / Refresh</button>'+
+      '<button class="btn" data-action="bid-clear-filters">Clear Filters</button>'+
       '<button class="btn" data-action="bid-import">Import Bidding Requirements</button>'+
       '<button class="btn" data-action="bid-new">+ Add Bid</button>'+
-    '</div></div><div class="panel"><h2>Bid / Proposal Pipeline</h2><p style="color:var(--muted);font-size:13px">Track BIDDING REQUIREMENT opportunities from identified requirement to proposal prep, submitted, awarded, lost, or no decision. B5.3 can import previous BIDDING REQUIREMENT call logs and auto-creates new ones going forward.</p></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
+    '</div></div><div class="panel"><h2>Bid / Proposal Pipeline</h2><p style="color:var(--muted);font-size:13px">Track BIDDING REQUIREMENT opportunities from identified requirement to proposal prep, submitted, awarded, lost, or no decision. B5.4 imports previous BIDDING REQUIREMENT call logs, auto-creates new ones, and clears hidden date/agent filters when drilling into stage cards.</p></div><div id="bid-body">'+loadingHtml('Loading bid pipeline…')+'</div>';
 
   // B5.2: Stage dropdown filters immediately.
   const st=$('#bid-stage');
@@ -1707,7 +1708,7 @@ async function loadBidPipeline(){
     const data = await api('getBidPipeline',params);
     const byStage = summary.byStage || {};
     const selectedStage = f.stage && f.stage !== 'ALL' ? f.stage : 'ALL';
-    const selectedLabel = selectedStage === 'ALL' ? 'Showing all stages' : 'Filtered to: ' + selectedStage;
+    const selectedLabel = (selectedStage === 'ALL' ? 'Showing all stages' : 'Filtered to: ' + selectedStage) + ' · Dates: ' + ((f.from||f.to) ? ((f.from||'Start') + ' to ' + (f.to||'Today')) : 'All') + ' · Agent: ' + ((f.agent && f.agent !== 'ALL') ? f.agent : (state.user.role==='MANAGER' ? 'All agents' : state.user.code));
     body.innerHTML =
       '<div class="panel" style="padding:10px 14px;color:var(--muted);font-weight:700">'+esc(selectedLabel)+'</div>'+
       '<div class="cards">'+
@@ -1735,25 +1736,31 @@ function bidTable(bids){
   ).join('')+'</tbody></table></div>';
 }
 
+function clearBidFilters(stage){
+  state.bidFilters = {from:'', to:'', agent:'ALL', stage:stage || 'ALL'};
+}
+
 ACTIONS['bid-apply']=()=>{
   const f=state.bidFilters;
   f.from=$('#bid-from').value; f.to=$('#bid-to').value; f.agent=$('#bid-agent').value; f.stage=$('#bid-stage').value;
   loadBidPipeline();
 };
+ACTIONS['bid-clear-filters']=()=>{
+  clearBidFilters('ALL');
+  renderBidPipeline($('#tab-content'));
+};
 ACTIONS['bid-quick']=(el,d)=>{ quickRange(state.bidFilters,d.q); renderBidPipeline($('#tab-content')); };
 ACTIONS['bid-filter-stage']=(el,d)=>{
-  if(!state.bidFilters) state.bidFilters={from:'', to:'', agent:'ALL', stage:'ALL'};
-  state.bidFilters.stage = d.stage || 'ALL';
+  // B5.4: Stage cards should match the stage summary counts. Clear hidden date/agent filters first.
+  clearBidFilters(d.stage || 'ALL');
   renderBidPipeline($('#tab-content'));
 };
 ACTIONS['bid-filter-all']=()=>{
-  if(!state.bidFilters) state.bidFilters={from:'', to:'', agent:'ALL', stage:'ALL'};
-  state.bidFilters.stage = 'ALL';
+  clearBidFilters('ALL');
   renderBidPipeline($('#tab-content'));
 };
 ACTIONS['bid-filter-open']=()=>{
-  if(!state.bidFilters) state.bidFilters={from:'', to:'', agent:'ALL', stage:'ALL'};
-  state.bidFilters.stage = 'ALL';
+  clearBidFilters('ALL');
   renderBidPipeline($('#tab-content'));
   toast('Open value includes IDENTIFIED, QUALIFYING, PROPOSAL PREP, and SUBMITTED. Use the stage cards to drill down.','success');
 };
@@ -1763,8 +1770,9 @@ ACTIONS['bid-import']=async (el)=>{
   el.disabled=true; el.textContent='Importing…';
   try{
     const res = await api('importBiddingRequirements',{});
-    toast('Imported '+(res.created||0)+' bid(s). Existing skipped: '+(res.skippedExisting||0),'success');
-    await loadBidPipeline();
+    toast('Imported '+(res.created||0)+' bid(s). Existing skipped: '+(res.skippedExisting||0)+'. Showing IDENTIFIED now.','success');
+    clearBidFilters('IDENTIFIED');
+    await renderBidPipeline($('#tab-content'));
   }catch(e){ toast(e.message,'error'); }
   finally{ el.disabled=false; el.textContent='Import Bidding Requirements'; }
 };
