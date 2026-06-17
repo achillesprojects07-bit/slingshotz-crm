@@ -162,6 +162,13 @@
   .extracted-item{border-top:1px solid #eef2f7;padding-top:7px;margin-top:7px;font-size:12.5px}
   .extracted-item:first-of-type{border-top:0;padding-top:0;margin-top:0}
   .reason-note{margin-top:7px;color:var(--muted);font-size:12.5px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:7px}
+
+  .review-status-box{border:1px solid var(--line);border-radius:8px;background:#f8fafc;margin-top:8px;padding:8px;font-size:12.5px}
+  .review-status-box b{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+  .review-status-reviewed{background:var(--good-soft);border-color:#86efac;color:#065f46}
+  .review-status-manager{background:var(--warn-soft);border-color:#fcd34d;color:#92400e}
+  .review-status-open{background:#f8fafc;color:var(--muted)}
+  .review-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
   .btn-viber{background:#7360f2;border-color:#7360f2;color:#fff}
   .btn-viber:hover{background:#5f4dd0}
   .qr-box{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
@@ -212,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4.2 CONTACT REVIEW DETAILS</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4.3 AGENT CONTACT REVIEW WORKFLOW</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -232,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B4.2 CONTACT REVIEW DETAILS</span>
+      <span class="build-tag" id="app-build-tag">B4.3 AGENT CONTACT REVIEW WORKFLOW</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -285,7 +292,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B4.2 CONTACT REVIEW DETAILS';
+const APP_BUILD = 'B4.3 AGENT CONTACT REVIEW WORKFLOW';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -305,6 +312,7 @@ const state = {
   trailFilters: null,
   bidFilters: null,
   eventFilters: { search:'', category:'', venue:'', range:'all' },
+  cleanupKind: '',
   lastReport: null,      // agent dashboard report cache
   lastMgrReport: null
 };
@@ -1946,8 +1954,9 @@ async function renderContactCleanup(c){
       '<button class="btn" data-action="phone-report">Refresh Report</button>'+ 
     '</div><div id="phone-report-box">'+loadingHtml('Loading cleanup report…')+'</div></div>'+ 
     '<div class="panel"><h2>Correct process</h2>'+ 
-    '<p style="color:var(--muted);margin-bottom:8px"><b>Managers</b> run the full phone cleanup after database edits. <b>Agents</b> review and edit companies under Needs Review, Invalid Numbers, and Companies with No Number.</p>'+ 
-    '<p style="color:var(--muted)">Click a card above to open the matching companies, then use Edit Company to correct Phone, Mobile, Primary Contact, or Other Contacts.</p></div>';
+    '<p style="color:var(--muted);margin-bottom:8px"><b>Managers</b> run the full phone cleanup after database edits. <b>Agents and managers</b> review Needs Review, Invalid Numbers, Multiple Numbers, and Companies with No Number.</p>'+ 
+    '<p style="color:var(--muted);margin-bottom:8px">After checking or editing, click <b>Mark Reviewed</b>. If the record still needs a manager decision, click <b>Still Needs Manager Review</b>.</p>'+
+    '<p style="color:var(--muted)">The original phone/mobile/contact notes stay visible so useful branch names, loc./extension details, and unclear numbers are not erased.</p></div>';
   try{ renderPhoneStats(await api('getPhoneCleanupReport',{})); }
   catch(e){ const box=$('#phone-report-box'); if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
 }
@@ -1982,12 +1991,31 @@ function companyById(cid){
   return state.queue && state.queue.companies.find(co=>String(co.companyId)===String(cid));
 }
 
-function phoneCompanyActionButtons(companyId, companyName){
+function phoneCompanyActionButtons(companyId, companyName, bucket){
   return '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">'+
     '<button class="btn btn-sm btn-primary" data-action="cleanup-edit" data-cid="'+esc(companyId)+'">Edit Company</button>'+ 
     '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName||'')+'">View History</button>'+ 
     '<button class="btn btn-sm" data-action="view-numbers" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName||'')+'">View Numbers</button>'+ 
+  '</div>'+contactReviewButtons(companyId, companyName, bucket);
+}
+
+function contactReviewButtons(companyId, companyName, bucket){
+  return '<div class="review-actions">'+
+    '<button class="btn btn-sm btn-primary" data-action="contact-review-mark" data-status="REVIEWED" data-bucket="'+esc(bucket||'')+'" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName||'')+'">Mark Reviewed</button>'+ 
+    '<button class="btn btn-sm" data-action="contact-review-mark" data-status="MANAGER_REVIEW" data-bucket="'+esc(bucket||'')+'" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName||'')+'">Still Needs Manager Review</button>'+ 
   '</div>';
+}
+
+function reviewStatusHtml(companyId, reviewMap){
+  const r = reviewMap && reviewMap[String(companyId)];
+  if(!r){
+    return '<div class="review-status-box review-status-open"><b>Review Status</b><span>Open — not yet reviewed.</span></div>';
+  }
+  const status = String(r.reviewStatus||'').toUpperCase();
+  const cls = status==='REVIEWED' ? 'review-status-reviewed' : (status==='MANAGER_REVIEW' ? 'review-status-manager' : 'review-status-open');
+  const label = status==='REVIEWED' ? 'Reviewed' : (status==='MANAGER_REVIEW' ? 'Still needs manager review' : (r.reviewStatus||'Open'));
+  return '<div class="review-status-box '+cls+'"><b>Review Status</b><span>'+esc(label)+' by '+esc(r.reviewedByName||r.reviewedBy||'')+' on '+esc(r.updatedAt||r.timestamp||'')+'</span>'+ 
+    (r.reviewNote?'<div style="margin-top:3px">Note: '+esc(r.reviewNote)+'</div>':'')+'</div>';
 }
 
 function groupedCompaniesFromNumbers(numbers){
@@ -2048,7 +2076,7 @@ function numberGroupsByCompany(numbers){
   return map;
 }
 
-function cleanupCompanyCardFromNumberGroup(g){
+function cleanupCompanyCardFromNumberGroup(g, reviewMap, bucket){
   const co = companyById(g.companyId) || {companyId:g.companyId, companyName:g.companyName};
   const nums = (g.numbers||[]);
   const statusSet = Array.from(new Set(nums.map(n=>String(n.validationStatus||'').toUpperCase()).filter(Boolean))).join(', ');
@@ -2056,34 +2084,39 @@ function cleanupCompanyCardFromNumberGroup(g){
     (statusSet==='INVALID' ? 'Extracted number failed validation. Check the original text and correct the company record.' :
     'Review extracted numbers and original contact text.');
   return '<div class="hist-item"><div class="top"><span><b>'+esc(g.companyName||co.companyName||'Unknown company')+'</b> <small style="color:var(--muted)">'+esc(g.companyId)+'</small></span></div>'+ 
+    reviewStatusHtml(g.companyId, reviewMap)+
     rawContactDetailsHtml(co, reason, nums)+
-    phoneCompanyActionButtons(g.companyId, g.companyName||co.companyName)+'</div>';
+    phoneCompanyActionButtons(g.companyId, g.companyName||co.companyName, bucket)+'</div>';
 }
 
-function cleanupCompanyCardFromCompany(co, note, numbers){
+function cleanupCompanyCardFromCompany(co, note, numbers, reviewMap, bucket){
   numbers = numbers || [];
   return '<div class="hist-item"><div class="top"><span><b>'+esc(co.companyName||'Unknown company')+'</b> <small style="color:var(--muted)">'+esc(co.companyId)+'</small></span>'+ 
     (co.category?' <span class="pill pill-neutral">'+esc(co.category)+'</span>':'')+'</div>'+ 
+    reviewStatusHtml(co.companyId, reviewMap)+
     '<div class="reason-note">'+esc(note||'Review company contact details.')+'</div>'+ 
     '<div style="margin-top:5px">'+(phoneLine(co)||'<div class="no-phone">No clean phone number</div>')+'</div>'+ 
     rawContactDetailsHtml(co, note, numbers)+
-    phoneCompanyActionButtons(co.companyId, co.companyName)+'</div>';
+    phoneCompanyActionButtons(co.companyId, co.companyName, bucket)+'</div>';
 }
 
 
 ACTIONS['phone-card']=async (el,d)=>{
   const kind = d.kind;
+  state.cleanupKind = kind || '';
   const box = $('#phone-review-box');
   if(!box) return;
   box.innerHTML = loadingHtml('Loading review list…');
   try{
+    const reviewData = await api('getContactReviewStatus',{});
+    const reviewMap = reviewData.map || {};
     if(kind==='review' || kind==='invalid'){
       await ensureQueueLoaded();
       const status = kind==='review' ? 'REVIEW' : 'INVALID';
       const data = await api('getCompanyContactNumbers',{status});
       const groups = groupedCompaniesFromNumbers(data.numbers||[]);
       box.innerHTML = '<div class="section-title"><h2>'+(kind==='review'?'Needs Review':'Invalid Numbers')+' ('+groups.length+' companies)</h2></div>'+ 
-        (groups.length ? groups.map(cleanupCompanyCardFromNumberGroup).join('') : emptyHtml('✅','No companies in this bucket.'));
+        (groups.length ? groups.map(g=>cleanupCompanyCardFromNumberGroup(g, reviewMap, kind)).join('') : emptyHtml('✅','No companies in this bucket.'));
       return;
     }
     const q = await ensureQueueLoaded();
@@ -2091,7 +2124,7 @@ ACTIONS['phone-card']=async (el,d)=>{
     if(kind==='none'){
       companies = (q.companies||[]).filter(co=>!co.hasCleanPhone && (!co.phoneCount || co.phoneValidationStatus==='NONE'));
       box.innerHTML = '<div class="section-title"><h2>Companies with No Clean Number ('+companies.length+')</h2></div>'+ 
-        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'No clean callable number was extracted. Check the original fields shown below, then add or correct Phone / Mobile / Other Contacts.', [])).join('') : emptyHtml('✅','No companies in this bucket.'));
+        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'No clean callable number was extracted. Check the original fields shown below, then add or correct Phone / Mobile / Other Contacts.', [], reviewMap, kind)).join('') : emptyHtml('✅','No companies in this bucket.'));
       return;
     }
     if(kind==='multi'){
@@ -2099,10 +2132,31 @@ ACTIONS['phone-card']=async (el,d)=>{
       const numsByCompany = numberGroupsByCompany(numsData.numbers||[]);
       companies = (q.companies||[]).filter(co=>Number(co.phoneCount||0)>1);
       box.innerHTML = '<div class="section-title"><h2>Companies with Multiple Numbers ('+companies.length+')</h2></div>'+ 
-        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'Multiple numbers were extracted. Review the extracted list and original fields, then correct or clarify the company record if needed.', numsByCompany[String(co.companyId)]||[])).join('') : emptyHtml('✅','No companies in this bucket.'));
+        (companies.length ? companies.map(co=>cleanupCompanyCardFromCompany(co,'Multiple numbers were extracted. Review the extracted list and original fields, then correct or clarify the company record if needed.', numsByCompany[String(co.companyId)]||[], reviewMap, kind)).join('') : emptyHtml('✅','No companies in this bucket.'));
       return;
     }
   }catch(e){ box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
+};
+
+ACTIONS['contact-review-mark']=async (el,d)=>{
+  const status = String(d.status||'').toUpperCase();
+  let note = '';
+  if(status==='MANAGER_REVIEW'){
+    note = prompt('Why does this still need manager review?') || '';
+    if(!note.trim()) return;
+  }else{
+    note = prompt('Optional note for this review:') || '';
+  }
+  el.disabled=true;
+  const oldText = el.textContent;
+  el.textContent = 'Saving…';
+  try{
+    await api('markContactReview',{companyId:d.cid, companyName:d.cname||'', bucket:d.bucket||state.cleanupKind||'', reviewStatus:status, reviewNote:note.trim()});
+    toast(status==='REVIEWED' ? 'Marked reviewed' : 'Marked for manager review','success');
+    if(state.tab==='cleanup' && state.cleanupKind){
+      await ACTIONS['phone-card'](el,{kind:state.cleanupKind});
+    }
+  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent=oldText; }
 };
 
 ACTIONS['cleanup-edit']=async (el,d)=>{
@@ -2148,7 +2202,7 @@ ACTIONS['phone-review']=async (el)=>{
     const data=await api('getCompanyContactNumbers',{status:'REVIEW,INVALID'});
     const groups=groupedCompaniesFromNumbers(data.numbers||[]);
     const box=$('#pr-body'); if(!box) return;
-    box.innerHTML = groups.length ? groups.map(cleanupCompanyCardFromNumberGroup).join('') : emptyHtml('✅','No numbers need review. All extracted numbers are valid.');
+    box.innerHTML = groups.length ? groups.map(g=>cleanupCompanyCardFromNumberGroup(g, {}, 'review')).join('') : emptyHtml('✅','No numbers need review. All extracted numbers are valid.');
   }catch(e){ const box=$('#pr-body'); if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
 };
 
