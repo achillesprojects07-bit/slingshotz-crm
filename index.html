@@ -203,7 +203,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B2.2 MEETING ALERTS</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B4 CONTACT DATA CLEANUP</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -223,7 +223,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B2.2 MEETING ALERTS</span>
+      <span class="build-tag" id="app-build-tag">B4 CONTACT DATA CLEANUP</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -263,19 +263,20 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 const API_URL = 'https://script.google.com/macros/s/AKfycbwov4NPqYNVKUokep_8crBARjgkmV0wizcJoCyxLFs5AT2oERSM2Fo6NqpmW2tvIQNI/exec';
 
 const CALL_RESULT_GROUPS = [
-  {label:'No Contact / Try Again', results:['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILABLE']},
-  {label:'Invalid Contact', results:['WRONG NUMBER','NUMBER UNREACHABLE']},
-  {label:'Not a Lead', results:['NO REQUIREMENT','NOT INTERESTED']},
-  {label:'Follow-Up / Nurture', results:['ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED']},
-  {label:'Opportunity', results:['BIDDING REQUIREMENT','COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']}
+  {label:'No Contact / Try Again', results:['NO ANSWER','BUSY / TRY AGAIN']},
+  {label:'Follow-Up / Nurture', results:['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']},
+  {label:'Meetings Booked', results:['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']},
+  {label:'Review Company Details', results:['WRONG NUMBER','NUMBER UNREACHABLE']},
+  {label:'Closed / Not Leads', results:['NO REQUIREMENT','NOT INTERESTED']}
 ];
 const CALL_RESULTS = CALL_RESULT_GROUPS.flatMap(g=>g.results);
-const MEANINGFUL = new Set(['ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
-const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN','CONTACT PERSON NOT AVAILABLE']);
+const MEANINGFUL = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
+const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN']);
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
-const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED','NUMBER UNREACHABLE','WRONG NUMBER']);
+const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
+const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B2.2 MEETING ALERTS';
+const APP_BUILD = 'B4 CONTACT DATA CLEANUP';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 
@@ -343,6 +344,7 @@ function resultPill(result){
   if (MEETING.has(result)) cls='pill-meet';
   else if (MEANINGFUL.has(result)) cls='pill-good';
   else if (RETRY.has(result)) cls='pill-retry';
+  else if (typeof REVIEW_DETAILS !== 'undefined' && REVIEW_DETAILS.has(result)) cls='pill-retry';
   else if (CLOSED.has(result)) cls='pill-closed';
   return '<span class="pill '+cls+'">'+esc(result||'—')+'</span>';
 }
@@ -644,6 +646,7 @@ const MANAGER_TABS = [
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
   {id:'events', label:'Events Leads', render: renderEvents},
   {id:'edithistory', label:'Company Edit History', render: renderEditHistory},
+  {id:'cleanup', label:'Contact Cleanup', render: renderContactCleanup},
   {id:'users', label:'Users / Settings', render: renderUsers}
 ];
 
@@ -1877,7 +1880,7 @@ async function renderUsers(c){
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
       '<button class="btn btn-primary" data-action="phone-sync">Run Phone Cleanup</button>'+
       '<button class="btn" data-action="phone-report">View Cleanup Report</button>'+
-      '<button class="btn" data-action="phone-review">Review Invalid Numbers</button>'+
+      '<button class="btn" data-action="phone-review">Review Invalid / Needs Review Numbers</button>'+
     '</div><div id="phone-report-box"></div></div>'+
     '<div class="panel"><h2>Demo Data</h2><p style="color:var(--muted);margin-bottom:10px">Clears DEMO CALL LOG, DEMO DAILY ACTION LIST, DEMO APP ACTIVITY LOG, DEMO EVENT MASTER and DEMO COMPANY STATUS. LIVE sheets and COMPANY MASTER are never touched.</p>'+
     '<button class="btn btn-danger" data-action="demo-reset">Reset Demo Data</button></div>';
@@ -1922,6 +1925,28 @@ ACTIONS['demo-reset']=async (el)=>{
   el.disabled=false; el.textContent='Reset Demo Data';
 };
 
+
+async function renderContactCleanup(c){
+  c.innerHTML =
+    '<div class="panel"><div class="section-title"><div><h2>Contact Cleanup</h2>'+
+    '<p style="color:var(--muted);margin-top:2px">Clean phone-number layer for calling. Original COMPANY MASTER phone text is preserved and never erased.</p></div></div>'+
+    '<div class="stats-grid" style="margin-bottom:12px">'+
+      '<div class="stat"><b>1</b><span>Run cleanup after database edits</span></div>'+
+      '<div class="stat"><b>2</b><span>Review invalid / unclear numbers</span></div>'+
+      '<div class="stat"><b>3</b><span>Use clean numbers for Call / QR buttons</span></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+      '<button class="btn btn-primary" data-action="phone-sync">Run Phone Cleanup</button>'+
+      '<button class="btn" data-action="phone-report">View Cleanup Report</button>'+
+      '<button class="btn" data-action="phone-review">Review Invalid / Needs Review Numbers</button>'+
+    '</div><div id="phone-report-box">'+loadingHtml('Loading cleanup report…')+'</div></div>'+
+    '<div class="panel"><h2>What this does</h2>'+
+    '<p style="color:var(--muted);margin-bottom:8px">This scans PHONE, MOBILE and OTHER CONTACTS, extracts callable numbers, and writes them to COMPANY CONTACT NUMBERS. It keeps the messy original text as reference so contact names, branches and local numbers are not lost.</p>'+
+    '<p style="color:var(--muted)">When agents mark WRONG NUMBER or NUMBER UNREACHABLE, those companies should be checked here and through Edit Company / View Numbers.</p></div>';
+  try{ renderPhoneStats(await api('getPhoneCleanupReport',{})); }
+  catch(e){ const box=$('#phone-report-box'); if(box) box.innerHTML='<div class="error-box">'+esc(e.message)+'</div>'; }
+}
+
 function renderPhoneStats(stats){
   const box=$('#phone-report-box'); if(!box) return;
   const items=[
@@ -1957,7 +1982,7 @@ ACTIONS['phone-report']=async (el)=>{
 };
 
 ACTIONS['phone-review']=async (el)=>{
-  openModal('<div class="modal-head"><h2>Numbers Needing Review</h2><button class="modal-x" data-action="close-modal">\u00D7</button></div>'+
+  openModal('<div class="modal-head"><h2>Review Company Details — Invalid / Unclear Numbers</h2><button class="modal-x" data-action="close-modal">\u00D7</button></div>'+
     '<div class="modal-body"><div id="pr-body">'+loadingHtml('Loading\u2026')+'</div></div>'+
     '<div class="modal-foot"><button class="btn" data-action="close-modal">Close</button></div>');
   try{
