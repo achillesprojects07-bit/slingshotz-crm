@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B6.2 MEETING STATUS CLEANUP</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B7 FOLLOW-UP SYSTEM CLEANUP</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B6.2 MEETING STATUS CLEANUP</span>
+      <span class="build-tag" id="app-build-tag">B7 FOLLOW-UP SYSTEM CLEANUP</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -286,13 +286,14 @@ const CALL_RESULT_GROUPS = [
   {label:'Closed / Not Leads', results:['NO REQUIREMENT','NOT INTERESTED']}
 ];
 const CALL_RESULTS = CALL_RESULT_GROUPS.flatMap(g=>g.results);
-const MEANINGFUL = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
+const MEANINGFUL = new Set(['ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
+const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']);
 const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN']);
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B6.2 MEETING STATUS CLEANUP';
+const APP_BUILD = 'B7 FOLLOW-UP SYSTEM CLEANUP';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -752,17 +753,36 @@ function followupCards(rows){
   if(!rows.length) return emptyHtml('✅','No open follow-ups. Nice and clean!');
   return '<div class="fu-grid">'+rows.map(f=>'<div class="fu-card'+(f.dueState==='overdue'||f.dueState==='due-today'?' fu-urgent':'')+'">'+
     '<div class="co">'+esc(f.companyName)+'</div>'+
-    '<div class="meta">'+esc(f.companyId)+' · Agent: <b>'+esc(f.agent)+'</b> · Logged '+esc(f.loggedAt)+'</div>'+
-    '<div>'+resultPill(f.result)+'</div>'+
+    '<div class="meta">'+esc(f.companyId)+' · Owner: <b>'+esc(f.agent)+'</b> · Logged '+esc(f.loggedAt)+'</div>'+
+    '<div>'+resultPill(f.result)+' <span class="pill pill-neutral">Owner-only follow-up</span></div>'+
     '<div>'+dueLabel(f)+'</div>'+
     (f.clientEventName?'<div class="meta">🎪 '+esc(f.clientEventName)+(f.clientEventDate?' ('+esc(f.clientEventDate)+')':'')+'</div>':'')+
     (f.notes?'<div class="notes">'+esc(f.notes)+'</div>':'')+
     phoneLine(f)+
-    '<div class="fu-actions">'+
-      '<button class="btn btn-sm btn-primary" data-action="open-call" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">Open / Log</button>'+
-      '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">View Call History</button>'+
-    '</div>'+
+    '<div class="fu-actions" style="flex-wrap:wrap">'+
+      '<button class="btn btn-sm btn-primary" data-action="open-call" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">Log Follow-Up</button>'+
+      '<button class="btn btn-sm" data-action="reschedule-followup" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'" data-result="'+esc(f.result)+'">Reschedule</button>'+
+      '<button class="btn btn-sm" data-action="close-followup" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">Close</button>'+
+      '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">History</button>'+ 
+    '</div>'+ 
   '</div>').join('')+'</div>';
+}
+
+function followupSummaryCards(rows){
+  rows = rows || [];
+  const counts = {
+    all: rows.length,
+    urgent: rows.filter(f=>f.dueState==='overdue'||f.dueState==='due-today').length,
+    upcoming: rows.filter(f=>f.dueState==='upcoming').length,
+    needsDate: rows.filter(f=>f.dueState==='needs-date'||f.needsDate).length
+  };
+  const card = (key,label,count) => '<div class="stat-card'+(state.fuRange===key?' selected':'')+'" data-action="fu-filter" data-range="'+key+'"><div class="num">'+count+'</div><div class="lbl">'+label+'</div></div>';
+  return '<div class="cards">'+
+    card('all','All Open Follow-Ups',counts.all)+
+    card('urgent','Overdue / Due Today',counts.urgent)+
+    card('upcoming','Upcoming',counts.upcoming)+
+    card('needs-date','Needs Follow-Up Date',counts.needsDate)+
+  '</div>';
 }
 
 function targetTable(rows){
@@ -1073,10 +1093,11 @@ async function renderFollowups(c){
   const rep = await api('getAgentDashboardReport', {user: state.user.code});
   state.lastReport = rep;
   if(!state.fuRange) state.fuRange = 'all';
-  const DUE_ORDER = {overdue:0,'due-today':1,upcoming:2};
-  const sorted = [...rep.followups].sort((a,b)=>(DUE_ORDER[a.dueState]??3)-(DUE_ORDER[b.dueState]??3));
+  const DUE_ORDER = {overdue:0,'due-today':1,'needs-date':2,upcoming:3};
+  const sorted = [...rep.followups].sort((a,b)=>(DUE_ORDER[a.dueState]??4)-(DUE_ORDER[b.dueState]??4));
   const filtered = state.fuRange==='urgent' ? sorted.filter(f=>f.dueState==='overdue'||f.dueState==='due-today')
                  : state.fuRange==='upcoming' ? sorted.filter(f=>f.dueState==='upcoming')
+                 : state.fuRange==='needs-date' ? sorted.filter(f=>f.dueState==='needs-date'||f.needsDate)
                  : sorted;
   c.innerHTML = '<div class="panel">'+
     '<div class="section-title"><h2>My Follow-Ups ('+filtered.length+(filtered.length!==rep.counts.followups?' of '+rep.counts.followups:'')+')</h2>'+
@@ -1085,12 +1106,61 @@ async function renderFollowups(c){
         '<option value="all"'+(state.fuRange==='all'?' selected':'')+'>All open</option>'+
         '<option value="urgent"'+(state.fuRange==='urgent'?' selected':'')+'>Overdue / Due today</option>'+
         '<option value="upcoming"'+(state.fuRange==='upcoming'?' selected':'')+'>Upcoming</option>'+
+        '<option value="needs-date"'+(state.fuRange==='needs-date'?' selected':'')+'>Needs date</option>'+
       '</select>'+
       '<button class="btn btn-sm" data-action="reload-tab">Refresh</button>'+
     '</div></div>'+
+    '<p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Follow-ups are owner-only. Contact Person Not Available stays here and does not count toward the 3-try no-answer/busy retry cap.</p>'+
+    followupSummaryCards(sorted)+
     followupCards(filtered)+'</div>';
   $('#fu-range').addEventListener('change', e=>{ state.fuRange=e.target.value; renderFollowups(c); });
 }
+
+ACTIONS['fu-filter'] = (el,d)=>{ state.fuRange = d.range || 'all'; renderTab('followups'); };
+
+ACTIONS['reschedule-followup'] = (el,d)=>{
+  const safeResult = FOLLOWUP_RESULTS_FRONT.has(String(d.result||'').toUpperCase()) ? String(d.result).toUpperCase() : 'ASKED TO CALL BACK';
+  openModal(
+    '<div class="modal-head"><h2>Reschedule Follow-Up — '+esc(d.cname)+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-body"><div class="form-grid">'+
+      '<div class="full"><label>Follow-Up Result</label><select id="fu-res-result">'+callResultOptions(safeResult)+'</select></div>'+
+      '<div><label>New Follow-Up Date *</label><input type="date" id="fu-res-date"></div>'+
+      '<div class="full"><label>Notes</label><textarea id="fu-res-notes" rows="3" placeholder="Why are we rescheduling? What should happen next?"></textarea></div>'+
+    '</div></div>'+
+    '<div class="modal-foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="save-reschedule-followup" data-cid="'+esc(d.cid)+'" data-cname="'+esc(d.cname)+'">Save Reschedule</button></div>'
+  );
+};
+
+ACTIONS['save-reschedule-followup'] = async (el,d)=>{
+  const result = $('#fu-res-result').value;
+  const date = $('#fu-res-date').value;
+  if(!date){ toast('Follow-Up Date is required','error'); return; }
+  el.disabled=true; el.textContent='Saving…';
+  try{
+    await api('logCall',{user:state.user.code, companyId:d.cid, companyName:d.cname, result, followUpDate:date, notes:$('#fu-res-notes').value.trim()});
+    toast('Follow-up rescheduled','success'); closeModal(); state.lastReport=null; state.lastMgrReport=null; renderTab(state.tab);
+  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Reschedule'; }
+};
+
+ACTIONS['close-followup'] = (el,d)=>{
+  openModal(
+    '<div class="modal-head"><h2>Close Follow-Up — '+esc(d.cname)+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-body"><div class="form-grid">'+
+      '<div class="full"><label>Close Result *</label><select id="fu-close-result"><option value="NO REQUIREMENT">NO REQUIREMENT</option><option value="NOT INTERESTED">NOT INTERESTED</option></select></div>'+
+      '<div class="full"><label>Notes</label><textarea id="fu-close-notes" rows="3" placeholder="Why are we closing this follow-up?"></textarea></div>'+
+    '</div></div>'+
+    '<div class="modal-foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-danger" data-action="save-close-followup" data-cid="'+esc(d.cid)+'" data-cname="'+esc(d.cname)+'">Close Follow-Up</button></div>'
+  );
+};
+
+ACTIONS['save-close-followup'] = async (el,d)=>{
+  const result = $('#fu-close-result').value;
+  el.disabled=true; el.textContent='Closing…';
+  try{
+    await api('logCall',{user:state.user.code, companyId:d.cid, companyName:d.cname, result, notes:$('#fu-close-notes').value.trim()});
+    toast('Follow-up closed','success'); closeModal(); state.lastReport=null; state.lastMgrReport=null; renderTab(state.tab);
+  }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Close Follow-Up'; }
+};
 
 /* ======================= AGENT: ACTIVITY LOG ========================== */
 
@@ -2458,7 +2528,8 @@ async function openCallModal(companyId, companyName, historyOnly){
       '<div class="form-grid">'+
         '<div class="full"><label>Call Result *</label><select id="cm-result"><option value="">Select result…</option>'+
           callResultOptions()+'</select></div>'+
-        '<div><label>Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+
+        '<div><label id="cm-date-label">Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+
+        '<div class="full"><small id="cm-date-help" style="color:var(--muted)">Follow-up date is required for follow-up results. Meeting date is required for meeting-set results.</small></div>'+
         '<div><label>Client Event Date</label><input type="date" id="cm-evdate"></div>'+
         '<div class="full"><label>Client Event Name</label><input id="cm-evname" placeholder="e.g. Product launch, trade show booth…"></div>'+
         '<div class="full"><label>Notes</label><textarea id="cm-notes" rows="3" placeholder="What happened on the call?"></textarea></div>'+
@@ -2470,6 +2541,17 @@ async function openCallModal(companyId, companyName, historyOnly){
     (historyOnly?'':'<button class="btn btn-primary" data-action="call-save" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Save Call</button>')+
     '</div>'
   );
+  const resultSel = $('#cm-result');
+  if(resultSel){
+    const updateDateLabel=()=>{
+      const r=String(resultSel.value||'').toUpperCase();
+      const lab=$('#cm-date-label'), help=$('#cm-date-help');
+      if(MEETING.has(r)){ if(lab) lab.textContent='Meeting Date *'; if(help) help.textContent='Required because this is a booked meeting.'; }
+      else if(FOLLOWUP_RESULTS_FRONT.has(r)){ if(lab) lab.textContent='Next Follow-Up Date *'; if(help) help.textContent='Required so it appears correctly in Follow-Ups Due.'; }
+      else { if(lab) lab.textContent='Next Follow-Up Date'; if(help) help.textContent='Optional unless this is a follow-up or meeting result.'; }
+    };
+    resultSel.addEventListener('change', updateDateLabel); updateDateLabel();
+  }
   try{
     const data = await api('getCallHistory',{companyId});
     const box=$('#cm-history'); if(!box) return;
@@ -2494,12 +2576,15 @@ ACTIONS['bid-from-call']=(el,d)=>{
 
 ACTIONS['call-save']=async (el,d)=>{
   const result=$('#cm-result').value;
+  const followUpDate=$('#cm-fudate').value;
   if(!result){ toast('Please select a call result','error'); return; }
+  if(MEETING.has(result) && !followUpDate){ toast('Meeting Date is required for meeting set results','error'); return; }
+  if(FOLLOWUP_RESULTS_FRONT.has(result) && !followUpDate){ toast('Follow-Up Date is required for follow-up results','error'); return; }
   el.disabled=true; el.textContent='Saving…';
   try{
     const saved = await api('logCall',{
       user: state.user.code, companyId: d.cid, companyName: d.cname, result,
-      followUpDate: $('#cm-fudate').value, clientEventName: $('#cm-evname').value.trim(),
+      followUpDate: followUpDate, clientEventName: $('#cm-evname').value.trim(),
       clientEventDate: $('#cm-evdate').value, notes: $('#cm-notes').value.trim()
     });
     const isMeeting = result==='COMPANY PROFILE MEETING SET' || result==='PROJECT BRIEFING MEETING SET';
