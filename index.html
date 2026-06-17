@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B8.3 CALL HISTORY TIMEOUT FIX</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B8.4 CALL SAVE HISTORY FIX</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B8.3 CALL HISTORY TIMEOUT FIX</span>
+      <span class="build-tag" id="app-build-tag">B8.4 CALL SAVE HISTORY FIX</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -292,7 +292,7 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B8.3 CALL HISTORY TIMEOUT FIX';
+const APP_BUILD = 'B8.4 CALL SAVE HISTORY FIX';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -2547,7 +2547,8 @@ async function openCallModal(companyId, companyName, historyOnly){
         '<div class="full"><label>Notes</label><textarea id="cm-notes" rows="3" placeholder="What happened on the call?"></textarea></div>'+
       '</div><hr style="border:0;border-top:1px solid var(--line);margin:16px 0">')+
     '<h3 style="margin-bottom:9px">Previous Call History</h3>'+
-    '<div id="cm-history">'+loadingHtml('Loading history…')+'</div>'+
+    '<div id="cm-history">'+(historyOnly ? loadingHtml('Loading history…') :
+      '<div class="empty"><div class="big">📞</div>History is optional. You can save the call now, or load history if needed.<br><br><button class="btn btn-sm" data-action="load-history" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Load Previous History</button></div>')+'</div>'+
     '</div>'+
     '<div class="modal-foot"><button class="btn" data-action="close-modal">'+(historyOnly?'Close':'Cancel')+'</button>'+
     (historyOnly?'':'<button class="btn btn-primary" data-action="call-save" data-cid="'+esc(companyId)+'" data-cname="'+esc(companyName)+'">Save Call</button>')+
@@ -2564,7 +2565,7 @@ async function openCallModal(companyId, companyName, historyOnly){
     };
     resultSel.addEventListener('change', updateDateLabel); updateDateLabel();
   }
-  loadCallHistory(companyId, companyName);
+  if(historyOnly) loadCallHistory(companyId, companyName);
 }
 
 function withTimeout(promise, ms, message){
@@ -2616,11 +2617,11 @@ ACTIONS['call-save']=async (el,d)=>{
   if(FOLLOWUP_RESULTS_FRONT.has(result) && !followUpDate){ toast('Follow-Up Date is required for follow-up results','error'); return; }
   el.disabled=true; el.textContent='Saving…';
   try{
-    const saved = await api('logCall',{
+    const saved = await withTimeout(api('logCall',{
       user: state.user.code, companyId: d.cid, companyName: d.cname, result,
       followUpDate: followUpDate, clientEventName: $('#cm-evname').value.trim(),
       clientEventDate: $('#cm-evdate').value, notes: $('#cm-notes').value.trim()
-    });
+    }), 15000, 'Saving the call is taking too long. Please try again. If it keeps happening, test the backend logCall route.');
     const isMeeting = result==='COMPANY PROFILE MEETING SET' || result==='PROJECT BRIEFING MEETING SET';
     if(isMeeting && saved.meetingAlert && saved.meetingAlert.sent){
       toast('Meeting logged — manager email alert sent','success');
