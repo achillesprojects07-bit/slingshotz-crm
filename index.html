@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B7 FOLLOW-UP SYSTEM CLEANUP</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B8 RETRY CAP RULES</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B7 FOLLOW-UP SYSTEM CLEANUP</span>
+      <span class="build-tag" id="app-build-tag">B8 RETRY CAP RULES</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -286,14 +286,13 @@ const CALL_RESULT_GROUPS = [
   {label:'Closed / Not Leads', results:['NO REQUIREMENT','NOT INTERESTED']}
 ];
 const CALL_RESULTS = CALL_RESULT_GROUPS.flatMap(g=>g.results);
-const MEANINGFUL = new Set(['ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
-const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']);
+const MEANINGFUL = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
 const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN']);
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B7 FOLLOW-UP SYSTEM CLEANUP';
+const APP_BUILD = 'B8 RETRY CAP RULES';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -785,13 +784,23 @@ function followupSummaryCards(rows){
   '</div>';
 }
 
+function retryAttemptHtml(t){
+  const attempts = Number(t && t.attempts) || 0;
+  const last = String((t && t.lastResult) || '').toUpperCase();
+  const status = String((t && t.status) || '').toUpperCase();
+  const cap = status==='RETRY CAP REACHED' || (attempts >= 3 && RETRY.has(last));
+  if(cap) return '<b>'+attempts+' / 3</b><br><span class="pill pill-retry">Cap reached</span>';
+  if(RETRY.has(last)) return '<b>'+attempts+' / 3</b><br><small style="color:var(--muted)">Retry active</small>';
+  return '<b>'+attempts+' / 3</b>';
+}
+
 function targetTable(rows){
   if(!rows.length) return emptyHtml('🎯','Your target list is empty. Add companies from the Add Targets tab.');
   return '<div class="table-wrap"><table><thead><tr><th>Company</th><th>Phone</th><th>Attempts</th><th>Last Result</th><th>Last Call</th><th>Added</th><th></th></tr></thead><tbody>'+
     rows.map(t=>'<tr>'+
       '<td><b>'+esc(t.companyName)+'</b><br><small style="color:var(--muted)">'+esc(t.companyId)+'</small></td>'+
       '<td style="min-width:170px">'+(phoneLine(t)||'\u2014')+'</td>'+
-      '<td>'+t.attempts+' / 3</td>'+
+      '<td>'+retryAttemptHtml(t)+'</td>'+
       '<td>'+(t.lastResult?resultPill(t.lastResult):'<span class="pill pill-neutral">NOT CALLED YET</span>')+'</td>'+
       '<td class="nowrap">'+esc(t.lastCallDate||'—')+'</td>'+
       '<td class="nowrap">'+esc(t.addedAt||'')+'</td>'+
@@ -820,7 +829,7 @@ function renderFunnel(todayCalls, needsActionCount){
     productive.filter(x=>x.count).map(x=>fRow('#F59E0B','↳ '+esc(x.label),x.count,'funnel-sub')).join('')+
     (noContact ? fRow('#6b7280','Calls to Retry',noContact) : '')+
     (closed    ? fRow('var(--bad)','Closed / Not Leads',closed) : '')+
-    (needsActionCount ? fRow('#F97316','Retry Cap Reached (total in list)',needsActionCount) : '')+
+    (needsActionCount ? fRow('#F97316','Retry Cap Reached',needsActionCount) : '')+
     '</div></div>';
 }
 
@@ -830,6 +839,7 @@ const DASH_CARDS = [
   {key:'meetings', label:'My Meetings Booked'},
   {key:'followups', label:'My Follow-Ups Due'},
   {key:'retryToday', label:'My Calls to Retry'},
+  {key:'needsAction', label:'Retry Cap Reached'},
   {key:'targetProgress', label:'My Target Progress'}
 ];
 
@@ -839,6 +849,7 @@ function agentDashCardValue(card, rep, rangeCalls){
   if(card.key==='completedToday') return isTodayRange(state.dashFilters) ? (rangeCalls.length||0)+' / '+(rep.counts.dailyTarget||0) : rangeCalls.length;
   if(card.key==='productiveToday') return totalCount(productiveBreakdownFromRows(rangeCalls));
   if(card.key==='retryToday') return sumResults(counts, Array.from(RETRY));
+  if(card.key==='needsAction') return rep.counts.needsAction || 0;
   if(card.key==='targetProgress') return (rep.counts.completedToday||0)+' / '+(rep.counts.dailyTarget||0);
   return rep.counts[card.key] || 0;
 }
@@ -884,6 +895,7 @@ function agentDashLabel(card){
   if(card.key==='completedToday') return isTodayRange(state.dashFilters) ? 'My Calls Today' : 'My Calls in Range';
   if(card.key==='productiveToday') return isTodayRange(state.dashFilters) ? 'My Productive Calls Today' : 'My Productive Calls in Range';
   if(card.key==='retryToday') return isTodayRange(state.dashFilters) ? 'My Calls to Retry Today' : 'My Calls to Retry in Range';
+  if(card.key==='needsAction') return 'Retry Cap Reached';
   if(card.key==='meetings') return 'My Meetings Booked';
   if(card.key==='followups') return 'My Open Follow-Ups';
   if(card.key==='targetProgress') return 'My Target Progress Today';
@@ -952,7 +964,7 @@ function renderDashDetail(){
   }
   else if (key==='needsAction'){
     title.textContent='Retry Cap Reached ('+rep.counts.needsAction+')';
-    box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies hit the 3-attempt retry cap without a meaningful result. Review and try again when ready.</p>'+targetTable(rep.needsAction||[]);
+    box.innerHTML='<p style="color:var(--muted);font-size:13px;margin-bottom:10px">These companies reached the 3-attempt cap for NO ANSWER or BUSY / TRY AGAIN. They are removed from active retry so agents do not keep calling endlessly.</p>'+targetTable(rep.needsAction||[]);
   }
   else if (key==='retryToday'){
     const retryRows = rangeCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase()));
