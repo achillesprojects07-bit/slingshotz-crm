@@ -219,7 +219,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B6.1 MEETING DASHBOARD CARDS</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B6.2 MEETING STATUS CLEANUP</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -239,7 +239,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B6.1 MEETING DASHBOARD CARDS</span>
+      <span class="build-tag" id="app-build-tag">B6.2 MEETING STATUS CLEANUP</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -292,10 +292,11 @@ const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B6.1 MEETING DASHBOARD CARDS';
+const APP_BUILD = 'B6.2 MEETING STATUS CLEANUP';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
-const MEETING_STATUSES = ['SCHEDULED','PREPARING','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
+const MEETING_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
+function normalizeMeetingStatus(s){ s=String(s||'SCHEDULED').toUpperCase().trim(); return s==='PREPARING' ? 'SCHEDULED' : s; }
 
 const state = {
   user: null,            // {code,name,role,canAddEvents,canSwitchLive}
@@ -1854,7 +1855,7 @@ ACTIONS['bid-delete']=async (el,d)=>{
 function meetingStatusPill(status){
   status = String(status||'').toUpperCase();
   let cls='pill-neutral';
-  if(status==='SCHEDULED' || status==='PREPARING') cls='pill-meet';
+  if(status==='SCHEDULED') cls='pill-meet';
   else if(status==='DONE') cls='pill-good';
   else if(status==='RESCHEDULED') cls='pill-retry';
   else if(status==='CANCELLED' || status==='NO SHOW') cls='pill-closed';
@@ -1914,7 +1915,6 @@ async function loadMeetingPipeline(){
       '<div class="cards">'+
         '<div class="stat-card" data-action="mtg-filter-all"><div class="num">'+summary.total+'</div><div class="lbl">Total Meetings<br><span style="color:var(--brand);font-weight:800">Click to review</span></div></div>'+
         '<div class="stat-card" data-action="mtg-filter-status" data-status="SCHEDULED"><div class="num">'+(byStatus.SCHEDULED||0)+'</div><div class="lbl">Scheduled<br><span style="color:var(--brand);font-weight:800">Click scheduled</span></div></div>'+
-        '<div class="stat-card" data-action="mtg-filter-status" data-status="PREPARING"><div class="num">'+(byStatus.PREPARING||0)+'</div><div class="lbl">Preparing<br><span style="color:var(--brand);font-weight:800">Click preparing</span></div></div>'+
         '<div class="stat-card" data-action="mtg-filter-status" data-status="DONE"><div class="num">'+(byStatus.DONE||0)+'</div><div class="lbl">Done<br><span style="color:var(--brand);font-weight:800">Click done</span></div></div>'+
       '</div>'+
       '<div class="panel"><h2>Meeting Status Summary</h2><p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Click a status to filter the meeting list below.</p><div class="stats-grid">'+MEETING_STATUSES.map(s=>'<div class="stat" style="cursor:pointer;'+(selectedStatus===s?'border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft) inset;':'')+'" data-action="mtg-filter-status" data-status="'+esc(s)+'"><b>'+(byStatus[s]||0)+'</b><span>'+esc(s)+'</span><br><small style="color:var(--brand);font-weight:800">Click to review</small></div>').join('')+'</div></div>'+
