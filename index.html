@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B13 EVENTS LEADS UPGRADE</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B14 USERS SETTINGS MANAGER PAGE</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B13 EVENTS LEADS UPGRADE</span>
+      <span class="build-tag" id="app-build-tag">B14 USERS SETTINGS MANAGER PAGE</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B13 EVENTS LEADS UPGRADE';
+const APP_BUILD = 'B14 USERS SETTINGS MANAGER PAGE';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -679,18 +679,21 @@ const AGENT_TABS = [
   {id:'leaderboard', label:'Leaderboard', render: renderLeaderboard}
 ];
 const MANAGER_TABS = [
-  {id:'command', label:'Manager Dashboard', render: renderCommandCenter},
+  {id:'command', label:'Pipeline Dashboard', render: renderCommandCenter},
   {id:'performance', label:'Agent Performance', render: renderPerformance},
+  {id:'users', label:'Users / Settings', render: renderUsers},
+  {id:'cleanup', label:'Contact Cleanup', render: renderContactCleanup}
+];
+const MANAGER_WORK_ROUTES = [
   {id:'worktrail', label:'Activity Log', render: renderWorkTrail},
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
   {id:'meetings', label:'Meetings Booked', render: renderMeetingPipeline},
   {id:'events', label:'Events Leads', render: renderEvents},
-  {id:'edithistory', label:'Company Edit History', render: renderEditHistory},
-  {id:'cleanup', label:'Contact Cleanup', render: renderContactCleanup},
-  {id:'users', label:'Users / Settings', render: renderUsers}
+  {id:'edithistory', label:'Company Edit History', render: renderEditHistory}
 ];
 
 function tabsFor(){ return state.user.role==='MANAGER' ? MANAGER_TABS : AGENT_TABS; }
+function routesFor(){ return state.user.role==='MANAGER' ? MANAGER_TABS.concat(MANAGER_WORK_ROUTES) : AGENT_TABS; }
 
 function enterApp(){
   $('#login-view').style.display='none';
@@ -728,8 +731,9 @@ $('#mode-switch').addEventListener('click', async ()=>{
 ACTIONS['goto-tab'] = (el,d)=> renderTab(d.tab);
 
 async function renderTab(tabId){
-  const tabs = tabsFor();
-  const tab = tabs.find(t=>t.id===tabId) || tabs[0];
+  const visibleTabs = tabsFor();
+  const routes = routesFor();
+  const tab = routes.find(t=>t.id===tabId) || visibleTabs[0];
   state.tab = tab.id;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab.id));
   const c = $('#tab-content');
@@ -1236,7 +1240,7 @@ async function renderEvents(c){
   const data = await api('getEvents', {search:f.search, category:f.category, venue:f.venue, range:f.range, source:f.source||'', leadStatus:f.leadStatus||'', company:f.company||''});
   const isMgr = state.user.role === 'MANAGER';
   const canAdd = isMgr || state.user.canAddEvents;
-  c.innerHTML = (isMgr ? upcomingClientEventsPanel(data.events) + finderPanelHtml() : '') +
+  c.innerHTML = (isMgr ? finderPanelHtml() : '') +
     '<div class="panel">'+
     '<div class="section-title"><h2>Events Leads — Sales Triggers ('+data.count+') <small style="color:var(--muted);font-weight:400">· '+esc(data.sheet)+'</small></h2>'+
       (canAdd?'<button class="btn btn-primary btn-sm" data-action="event-new">+ Add Event Lead</button>':'')+'</div>'+
@@ -1754,7 +1758,7 @@ async function loadCommandCenter(){
     ];
 
     body.innerHTML =
-      '<div class="panel"><div class="section-title"><h2>Manager Command Center</h2><small style="color:var(--muted);font-weight:700">'+esc(rangeLabel(f))+'</small></div>'+ 
+      '<div class="panel"><div class="section-title"><h2>Pipeline Dashboard</h2><small style="color:var(--muted);font-weight:700">'+esc(rangeLabel(f))+'</small></div>'+ 
       '<p style="color:var(--muted);font-size:13px;margin-bottom:10px">This dashboard is now action-based. Click a card to open the list or working tab behind the number.</p></div>'+ 
       '<div class="dashboard-grid">'+
         '<div class="panel"><div class="section-title"><h2>1. What needs attention now?</h2></div><div class="cards">'+actionRequired.map(ccDashboardCard).join('')+'</div></div>'+ 
@@ -2401,31 +2405,38 @@ async function renderEditHistory(c){
 
 async function renderUsers(c){
   const data = await api('getUsers',{});
-  state.users = data.users;
+  state.users = data.users || [];
+  const managers = state.users.filter(u=>u.role==='MANAGER').length;
+  const agents = state.users.filter(u=>u.role!=='MANAGER').length;
+  const active = state.users.filter(u=>u.active).length;
   c.innerHTML =
-    '<div class="panel"><div class="section-title"><h2>Users ('+data.count+')</h2>'+
-      '<button class="btn btn-primary btn-sm" data-action="user-new">+ Add User</button></div>'+
-    '<div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Events</th><th>LIVE Switch</th><th></th></tr></thead><tbody>'+
-    data.users.map(u=>'<tr>'+
-      '<td><b>'+esc(u.code)+'</b></td><td>'+esc(u.name)+'</td><td>'+esc(u.email||'')+'</td>'+
-      '<td><span class="pill '+(u.role==='MANAGER'?'pill-meet':'pill-neutral')+'">'+esc(u.role)+'</span></td>'+
-      '<td><span class="pill '+(u.active?'pill-good':'pill-closed')+'">'+(u.active?'ACTIVE':'INACTIVE')+'</span></td>'+
-      '<td>'+(u.canAddEvents?'✓':'—')+'</td><td>'+(u.canSwitchLive?'✓':'—')+'</td>'+
-      '<td class="nowrap">'+
+    '<div class="panel"><div class="section-title"><div><h2>Users / Settings</h2>'+ 
+      '<p style="color:var(--muted);margin-top:2px">Manager-only page for maintaining active users, roles, PINs, daily targets, and access.</p></div>'+ 
+      '<button class="btn btn-primary btn-sm" data-action="user-new">+ Add Agent</button></div>'+ 
+      '<div class="stats-grid">'+
+        '<div class="stat"><b>'+esc(active)+'</b><span>Active users</span></div>'+ 
+        '<div class="stat"><b>'+esc(managers)+'</b><span>Managers</span></div>'+ 
+        '<div class="stat"><b>'+esc(agents)+'</b><span>Telemarketers</span></div>'+ 
+        '<div class="stat"><b>'+esc(data.count||state.users.length)+'</b><span>Total users</span></div>'+ 
+      '</div></div>'+ 
+    '<div class="panel"><div class="section-title"><h2>User Maintenance</h2><small style="color:var(--muted);font-weight:700">Only managers can change this page.</small></div>'+ 
+    '<div class="table-wrap"><table><thead><tr><th>Code</th><th>Full Name</th><th>Email</th><th>Role</th><th>Daily Target</th><th>Status</th><th>Events</th><th>LIVE Switch</th><th>Actions</th></tr></thead><tbody>'+ 
+    state.users.map(u=>'<tr>'+ 
+      '<td><b>'+esc(u.code)+'</b></td>'+ 
+      '<td>'+esc(u.name)+'</td>'+ 
+      '<td>'+esc(u.email||'')+'</td>'+ 
+      '<td><span class="pill '+(u.role==='MANAGER'?'pill-meet':'pill-neutral')+'">'+(u.role==='MANAGER'?'Manager':'Telemarketer')+'</span></td>'+ 
+      '<td><b>'+esc(u.dailyTarget || 40)+'</b></td>'+ 
+      '<td><span class="pill '+(u.active?'pill-good':'pill-closed')+'">'+(u.active?'ACTIVE':'INACTIVE')+'</span></td>'+ 
+      '<td>'+(u.canAddEvents?'✓':'—')+'</td><td>'+(u.canSwitchLive?'✓':'—')+'</td>'+ 
+      '<td class="nowrap">'+ 
         '<button class="btn btn-sm" data-action="user-edit" data-code="'+esc(u.code)+'">Edit</button> '+
         '<button class="btn btn-sm" data-action="user-pin" data-code="'+esc(u.code)+'">Reset PIN</button> '+
-        '<button class="btn btn-sm" data-action="user-unlock" data-code="'+esc(u.code)+'">Unlock</button> '+
-        '<button class="btn btn-sm '+(u.active?'btn-danger':'')+'" data-action="user-toggle" data-code="'+esc(u.code)+'" data-active="'+u.active+'">'+(u.active?'Deactivate':'Reactivate')+'</button>'+
-      '</td></tr>').join('')+'</tbody></table></div></div>'+
-    '<div class="panel"><h2>Phone Number Cleanup</h2>'+
-    '<p style="color:var(--muted);margin-bottom:10px">Extracts, splits and normalizes phone numbers from COMPANY MASTER into the COMPANY CONTACT NUMBERS sheet (one clean number per row). Original phone cells are never modified. Call and QR buttons only use VALID cleaned numbers.</p>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-      '<button class="btn btn-primary" data-action="phone-sync">Run Phone Cleanup</button>'+
-      '<button class="btn" data-action="phone-report">View Cleanup Report</button>'+
-      '<button class="btn" data-action="phone-review">Review Invalid / Needs Review Numbers</button>'+
-    '</div><div id="phone-report-box"></div></div>'+
-    '<div class="panel"><h2>Demo Data</h2><p style="color:var(--muted);margin-bottom:10px">Clears DEMO CALL LOG, DEMO DAILY ACTION LIST, DEMO APP ACTIVITY LOG, DEMO EVENT MASTER and DEMO COMPANY STATUS. LIVE sheets and COMPANY MASTER are never touched.</p>'+
-    '<button class="btn btn-danger" data-action="demo-reset">Reset Demo Data</button></div>';
+        '<button class="btn btn-sm '+(u.active?'btn-danger':'')+'" data-action="user-toggle" data-code="'+esc(u.code)+'" data-active="'+u.active+'">'+(u.active?'Deactivate':'Reactivate')+'</button>'+ 
+      '</td></tr>').join('')+'</tbody></table></div></div>'+ 
+    '<div class="panel"><h2>Manager tab structure</h2>'+ 
+    '<p style="color:var(--muted);margin-bottom:8px">Manager navigation is kept clean: <b>Pipeline Dashboard</b>, <b>Agent Performance</b>, <b>Users / Settings</b>, and <b>Contact Cleanup</b>.</p>'+ 
+    '<p style="color:var(--muted)">Work areas such as Bid Pipeline, Meetings Booked, Events Leads, Activity Log, and Company Edit History still open from dashboard drilldowns when needed, but they are no longer permanent manager tabs.</p></div>';
 }
 
 ACTIONS['user-new']=()=>openUserModal(null);
@@ -2733,13 +2744,14 @@ ACTIONS['phone-review']=async (el)=>{
 function openUserModal(u){
   const isNew=!u; u=u||{};
   openModal(
-    '<div class="modal-head"><h2>'+(isNew?'Add User':'Edit '+esc(u.code))+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
+    '<div class="modal-head"><h2>'+(isNew?'Add Agent':'Edit '+esc(u.code))+'</h2><button class="modal-x" data-action="close-modal">×</button></div>'+
     '<div class="modal-body"><div class="form-grid">'+
       '<div><label>User Code *</label><input id="um-code" value="'+esc(u.code||'')+'" '+(isNew?'':'disabled')+' placeholder="e.g. JDC" style="text-transform:uppercase"></div>'+
       '<div><label>Name *</label><input id="um-name" value="'+esc(u.name||'')+'"></div>'+
       '<div><label>Email</label><input id="um-email" type="email" value="'+esc(u.email||'')+'" placeholder="manager@email.com"></div>'+
       (isNew?'<div><label>PIN *</label><input id="um-pin" placeholder="e.g. 4321"></div>':'')+
-      '<div><label>Role</label><select id="um-role"><option'+(u.role!=='MANAGER'?' selected':'')+'>AGENT</option><option'+(u.role==='MANAGER'?' selected':'')+'>MANAGER</option></select></div>'+
+      '<div><label>Role *</label><select id="um-role"><option value="AGENT"'+(u.role!=='MANAGER'?' selected':'')+'>Telemarketer</option><option value="MANAGER"'+(u.role==='MANAGER'?' selected':'')+'>Manager</option></select></div>'+
+      '<div><label>Daily Target</label><input id="um-target" type="number" min="1" step="1" value="'+esc(u.dailyTarget||40)+'"></div>'+
       '<div><label>Can Add Events</label><select id="um-events"><option value="TRUE"'+(u.canAddEvents!==false?' selected':'')+'>Yes</option><option value="FALSE"'+(u.canAddEvents===false?' selected':'')+'>No</option></select></div>'+
       '<div><label>Can Switch to LIVE</label><select id="um-live"><option value="FALSE"'+(!u.canSwitchLive?' selected':'')+'>No</option><option value="TRUE"'+(u.canSwitchLive?' selected':'')+'>Yes</option></select></div>'+
     '</div></div>'+
@@ -2755,7 +2767,7 @@ ACTIONS['user-save']=async (el,d)=>{
   if(!code||!name){ toast('User code and name are required','error'); return; }
   el.disabled=true; el.textContent='Saving…';
   try{
-    const common={by:state.user.code, code, name, email:$('#um-email').value.trim(), role:$('#um-role').value, canAddEvents:$('#um-events').value, canSwitchLive:$('#um-live').value};
+    const common={by:state.user.code, code, name, email:$('#um-email').value.trim(), role:$('#um-role').value, dailyTarget:$('#um-target').value, canAddEvents:$('#um-events').value, canSwitchLive:$('#um-live').value};
     if(isNew){
       const pin=$('#um-pin').value.trim();
       if(!pin){ toast('PIN is required for a new user','error'); el.disabled=false; el.textContent='Save User'; return; }
