@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B10 AGENT PERFORMANCE DASHBOARD</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B11 COMPANY SEARCH / ADD TARGETS POLISH</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B10 AGENT PERFORMANCE DASHBOARD</span>
+      <span class="build-tag" id="app-build-tag">B11 COMPANY SEARCH / ADD TARGETS POLISH</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,8 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B10 AGENT PERFORMANCE DASHBOARD';
+const APP_BUILD = 'B11 COMPANY SEARCH / ADD TARGETS POLISH';
+// B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_UPDATE_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -1027,11 +1028,16 @@ async function renderAddTargets(c){
   const q=state.queue, f=state.queueFilters;
   c.innerHTML =
     '<div class="panel">'+
-    '<div class="section-title"><h2>Company Database ('+q.count+' companies)</h2>'+
-    '<div style="display:flex;gap:8px;">'+
+    '<div class="section-title"><div><h2>Company Database — Add Targets ('+q.count+' companies)</h2>'+
+    '<p style="color:var(--muted);font-size:12.5px;margin-top:2px">Source: <b>COMPANY MASTER</b>. Adding a target writes only to <b>DAILY ACTION LIST</b>. My Target List does not read the full company database.</p></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
     '<button class="btn btn-primary btn-sm" data-action="company-new">+ Add Company</button>'+
+    '<button class="btn btn-sm" data-action="queue-clear-filters">Clear Filters</button>'+
     '<button class="btn btn-sm" data-action="queue-refresh">Reload Database</button>'+
     '</div></div>'+
+    '<div class="reason-note" style="margin-bottom:12px;background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a">'+
+      '<b>B11 Add Targets rule:</b> All categories + no search shows the full COMPANY MASTER. A selected category with no search shows all companies in that category. Search narrows the selected category. Duplicate targets are blocked and remain marked as Already Added.'+
+    '</div>'+
     '<div class="filter-bar">'+
       '<div class="field"><label>Category</label><select id="q-cat"><option value="">All categories</option>'+
         q.categories.map(cat=>'<option'+(f.cat===cat?' selected':'')+'>'+esc(cat)+'</option>').join('')+'</select></div>'+
@@ -1049,6 +1055,13 @@ async function renderAddTargets(c){
 }
 
 ACTIONS['queue-refresh'] = ()=>{ state.queue=null; renderTab('add'); };
+ACTIONS['queue-clear-filters'] = ()=>{
+  state.queueFilters.cat='';
+  state.queueFilters.search='';
+  state.queueFilters.eventsJoined='';
+  state.queueFilters.page=1;
+  renderTab('add');
+};
 
 function filteredQueue(){
   const f=state.queueFilters;
@@ -1073,8 +1086,13 @@ function renderQueueList(){
   const start=(f.page-1)*PAGE_SIZE;
   const page=list.slice(start, start+PAGE_SIZE);
   const isMgr = state.user.role==='MANAGER';
-  if(!list.length){ box.innerHTML=emptyHtml('🔍','No companies match your filters.'); return; }
+  if(!list.length){
+    box.innerHTML='<div class="reason-note" style="background:#fff7ed;border-color:#fed7aa;color:#92400e">No companies match the current filters. Clear Search or choose All categories to return to the full COMPANY MASTER list.</div>'+emptyHtml('🔍','No companies match your filters.');
+    return;
+  }
+  const filterSummary = (f.cat ? 'Category: '+esc(f.cat) : 'All categories') + (f.search ? ' · Search: '+esc(f.search) : ' · No search') + (f.eventsJoined ? ' · Events: '+esc(f.eventsJoined) : '');
   box.innerHTML =
+    '<div class="reason-note" style="margin-bottom:10px;background:#f8fafc;border-color:var(--line)"><b>Showing '+list.length+' companies</b> from COMPANY MASTER · '+filterSummary+'</div>'+
     '<div class="table-wrap"><table><thead><tr><th>Company</th><th>Category</th><th>Contact</th><th>Phone / Mobile</th><th>Owner / Status</th><th></th></tr></thead><tbody>'+
     page.map(co=>'<tr>'+
       '<td><b>'+esc(co.companyName)+'</b><br><small style="color:var(--muted)">'+esc(co.companyId)+'</small></td>'+
@@ -1085,7 +1103,7 @@ function renderQueueList(){
       '<td>'+(co.owner?'<b>'+esc(co.owner)+'</b><br>':'')+(co.accountStatus?'<span class="pill pill-neutral">'+esc(co.accountStatus)+'</span>':'—')+'</td>'+
       '<td class="nowrap">'+
         (co.alreadyAdded
-          ? '<button class="btn btn-sm" disabled>Already Added</button>'
+          ? '<button class="btn btn-sm" disabled title="Already in your DAILY ACTION LIST">Already Added</button>'
           : '<button class="btn btn-sm btn-primary" data-action="add-target" data-cid="'+esc(co.companyId)+'" data-cname="'+esc(co.companyName)+'">Add to Targets</button>')+
         ' <button class="btn btn-sm" data-action="view-history" data-cid="'+esc(co.companyId)+'" data-cname="'+esc(co.companyName)+'">History</button>'+
         ' <button class="btn btn-sm btn-ghost" data-action="edit-company" data-cid="'+esc(co.companyId)+'">Edit</button>'+
@@ -1108,7 +1126,13 @@ ACTIONS['add-target'] = async (el,d)=>{
     el.textContent='Already Added';
     toast(d.cname+' added to your targets','success');
   }catch(e){
-    if (/already/i.test(e.message)){ el.textContent='Already Added'; }
+    if (/already/i.test(e.message)){
+      const co=state.queue && state.queue.companies.find(x=>x.companyId===d.cid);
+      if(co) co.alreadyAdded=true;
+      el.disabled=true;
+      el.textContent='Already Added';
+      toast('Already in your target list','success');
+    }
     else { el.disabled=false; el.textContent='Add to Targets'; toast(e.message,'error'); }
   }
 };
