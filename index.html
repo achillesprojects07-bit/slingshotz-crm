@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B11.1 COMPANY DATABASE LABEL CLEANUP</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B12 ACTIVITY LOG / CALL HISTORY UPGRADE</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B11.1 COMPANY DATABASE LABEL CLEANUP</span>
+      <span class="build-tag" id="app-build-tag">B12 ACTIVITY LOG / CALL HISTORY UPGRADE</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B11.1 COMPANY DATABASE LABEL CLEANUP';
+const APP_BUILD = 'B12 ACTIVITY LOG / CALL HISTORY UPGRADE';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -681,7 +681,7 @@ const AGENT_TABS = [
 const MANAGER_TABS = [
   {id:'command', label:'Manager Dashboard', render: renderCommandCenter},
   {id:'performance', label:'Agent Performance', render: renderPerformance},
-  {id:'worktrail', label:'Work Trail', render: renderWorkTrail},
+  {id:'worktrail', label:'Activity Log', render: renderWorkTrail},
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
   {id:'meetings', label:'Meetings Booked', render: renderMeetingPipeline},
   {id:'events', label:'Events Leads', render: renderEvents},
@@ -1035,7 +1035,9 @@ async function renderAddTargets(c){
     '<button class="btn btn-sm" data-action="queue-clear-filters">Clear Filters</button>'+
     '<button class="btn btn-sm" data-action="queue-refresh">Reload Database</button>'+
     '</div></div>'+
-
+    '<div class="reason-note" style="margin-bottom:12px;background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a">'+
+      '<b>B11 Add Targets rule:</b> All categories + no search shows the full COMPANY MASTER. A selected category with no search shows all companies in that category. Search narrows the selected category. Duplicate targets are blocked and remain marked as Already Added.'+
+    '</div>'+
     '<div class="filter-bar">'+
       '<div class="field"><label>Category</label><select id="q-cat"><option value="">All categories</option>'+
         q.categories.map(cat=>'<option'+(f.cat===cat?' selected':'')+'>'+esc(cat)+'</option>').join('')+'</select></div>'+
@@ -2286,8 +2288,14 @@ ACTIONS['pf-open-work']=(el,d)=>{
 /* ======================== MANAGER: WORK TRAIL ========================= */
 
 const TRAIL_TYPES=[
-  ['all','All'],['calls','Calls Logged'],['targets_added','Targets Added'],['targets_removed','Targets Removed'],
-  ['company_edits','Companies Edited'],['events','Events Added'],['users','Users Updated'],['app','Login / App Activity']
+  ['all','All activity except removed targets'],
+  ['calls','Calls Logged'],
+  ['targets_added','Targets Added'],
+  ['targets_removed','Removed Targets (audit only)'],
+  ['company_edits','Company Detail Edits'],
+  ['events','Events Added / Updated'],
+  ['users','Users Updated'],
+  ['app','Login / App Activity']
 ];
 
 async function renderWorkTrail(c){
@@ -2301,46 +2309,77 @@ async function renderWorkTrail(c){
 async function renderTrailUI(c, lockAgent){
   const f=state.trailFilters;
   f.locked = lockAgent;
+  if(f.company==null) f.company='';
+  if(f.result==null) f.result='';
   c.innerHTML =
-    '<div class="panel"><div class="filter-bar">'+
-      '<div class="field"><label>From Date</label><input type="date" id="wt-from" value="'+esc(f.from)+'"></div>'+
-      '<div class="field"><label>To Date</label><input type="date" id="wt-to" value="'+esc(f.to)+'"></div>'+
+    '<div class="panel"><div class="section-title"><div><h2>'+(lockAgent?'My Activity Log':'Activity Log')+'</h2><div style="color:var(--muted);font-size:12.5px">B12 view: filter by agent, company, call result, activity type, and date. Removed targets are hidden from All activity to avoid clutter.</div></div></div>'+ 
+    '<div class="filter-bar">'+
+      '<div class="field"><label>From Date</label><input type="date" id="wt-from" value="'+esc(f.from)+'"></div>'+ 
+      '<div class="field"><label>To Date</label><input type="date" id="wt-to" value="'+esc(f.to)+'"></div>'+ 
       (lockAgent?'':'<div class="field"><label>Agent</label><select id="wt-agent">'+agentOptions(f.agent)+'</select></div>')+
-      '<div class="field"><label>Activity Type</label><select id="wt-type">'+TRAIL_TYPES.map(t=>'<option value="'+t[0]+'"'+(f.type===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select></div>'+
-      '<button class="btn btn-primary" data-action="wt-apply">Refresh</button>'+
-    '</div></div>'+
-    '<div id="wt-body">'+loadingHtml('Loading work trail…')+'</div>';
+      '<div class="field" style="min-width:190px"><label>Company</label><input id="wt-company" value="'+esc(f.company||'')+'" placeholder="Company name or ID..."></div>'+ 
+      '<div class="field"><label>Call Result</label><select id="wt-result"><option value="">All results</option>'+CALL_RESULTS.map(r=>'<option value="'+esc(r)+'"'+(String(f.result||'').toUpperCase()===r?' selected':'')+'>'+esc(r)+'</option>').join('')+'</select></div>'+ 
+      '<div class="field"><label>Activity Type</label><select id="wt-type">'+TRAIL_TYPES.map(t=>'<option value="'+t[0]+'"'+(f.type===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select></div>'+ 
+      '<button class="btn btn-primary" data-action="wt-apply">Refresh</button>'+ 
+      '<button class="btn" data-action="wt-clear">Clear Filters</button>'+ 
+    '</div>'+ 
+    '<div class="quick-ranges"><button class="chip" data-action="wt-quick" data-q="today">Today</button><button class="chip" data-action="wt-quick" data-q="7">Last 7 days</button><button class="chip" data-action="wt-quick" data-q="30">Last 30 days</button><button class="chip" data-action="wt-quick" data-q="month">This month</button></div>'+ 
+    '</div>'+ 
+    '<div id="wt-body">'+loadingHtml('Loading activity log…')+'</div>';
   try{
-    // Agents use getMyActivity (agent-level auth); managers use getWorkTrailRange (manager auth)
     const action = lockAgent ? 'getMyActivity' : 'getWorkTrailRange';
     const params = lockAgent
-      ? {fromDate:f.from, toDate:f.to, type:f.type}
-      : {fromDate:f.from, toDate:f.to, user:f.agent, type:f.type};
+      ? {fromDate:f.from, toDate:f.to, type:f.type, company:f.company||'', result:f.result||''}
+      : {fromDate:f.from, toDate:f.to, agent:f.agent, user:f.agent, type:f.type, company:f.company||'', result:f.result||''};
     const data = await api(action, params);
-    $('#wt-body').innerHTML='<div class="panel"><h2>'+(lockAgent?'My Activity':'Work Trail')+' ('+data.count+')</h2>'+trailTable(data.entries)+'</div>';
+    $('#wt-body').innerHTML='<div class="panel"><div class="section-title"><div><h2>'+(lockAgent?'My Activity Log':'Activity Log')+' ('+data.count+')</h2><div style="color:var(--muted);font-size:12.5px">Use History to view the complete company call history. Managers can also open Company Edit History.</div></div></div>'+trailTable(data.entries)+'</div>';
   }catch(e){ $('#wt-body').innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
 ACTIONS['wt-apply']=()=>{
   const f=state.trailFilters;
   f.from=$('#wt-from').value; f.to=$('#wt-to').value; f.type=$('#wt-type').value;
+  f.company=$('#wt-company') ? $('#wt-company').value.trim() : '';
+  f.result=$('#wt-result') ? $('#wt-result').value : '';
   const sel=$('#wt-agent'); if(sel) f.agent=sel.value;
   renderTrailUI($('#tab-content'), f.locked);
 };
+ACTIONS['wt-clear']=()=>{
+  const locked = state.trailFilters && state.trailFilters.locked;
+  const agent = locked ? state.user.code : 'ALL';
+  state.trailFilters={from:addDays(-6),to:todayStr(),agent:agent,type:'all',company:'',result:'',locked:locked};
+  renderTrailUI($('#tab-content'), locked);
+};
+ACTIONS['wt-quick']=(el,d)=>{ quickRange(state.trailFilters,d.q); renderTrailUI($('#tab-content'), state.trailFilters.locked); };
 
 function trailTable(entries){
-  if(!entries.length) return emptyHtml('👣','No activity in this range. (Tip: the trail merges the Activity Log AND the Call Log.)');
-  return '<div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>Agent</th><th>Activity</th><th>Company / Event</th><th>Details</th><th>Source</th><th></th></tr></thead><tbody>'+
-    entries.map(en=>'<tr>'+
-      '<td class="nowrap">'+esc(en.timestamp)+'</td>'+
-      '<td><b>'+esc(en.agent)+'</b></td>'+
-      '<td><span class="pill pill-neutral">'+esc(en.type)+'</span></td>'+
-      '<td>'+esc(en.company||'—')+(en.companyId?'<br><small style="color:var(--muted)">'+esc(en.companyId)+'</small>':'')+'</td>'+
-      '<td style="max-width:280px">'+esc(en.details||'')+'</td>'+
-      '<td><span class="src-badge'+(en.source==='Call Log'?' call':'')+'">'+esc(en.source)+'</span></td>'+
-      '<td class="nowrap">'+(en.companyId?callActions(en.companyId,en.company):'')+'</td>'+
-    '</tr>').join('')+'</tbody></table></div>';
+  if(!entries.length) return emptyHtml('👣','No activity found for these filters. Removed targets are hidden from All activity; select Removed Targets (audit only) when you need to audit removals.');
+  return '<div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>Agent</th><th>Activity</th><th>Company / Event</th><th>Details</th><th>Source</th><th>Actions</th></tr></thead><tbody>'+ 
+    entries.map(en=>{
+      const companyName = en.company || '';
+      const buttons = en.companyId
+        ? callActions(en.companyId, companyName).replace('History</button>','Call History</button>') + (state.user && state.user.role==='MANAGER' ? ' <button class="btn btn-sm" data-action="view-edit-history" data-cid="'+esc(en.companyId)+'" data-cname="'+esc(companyName)+'">Edit History</button>' : '')
+        : '';
+      return '<tr>'+ 
+      '<td class="nowrap">'+esc(en.timestamp)+'</td>'+ 
+      '<td><b>'+esc(en.agent)+'</b></td>'+ 
+      '<td><span class="pill pill-neutral">'+esc(en.type)+'</span></td>'+ 
+      '<td>'+esc(companyName||'—')+(en.companyId?'<br><small style="color:var(--muted)">'+esc(en.companyId)+'</small>':'')+'</td>'+ 
+      '<td style="max-width:320px">'+esc(en.details||'')+'</td>'+ 
+      '<td><span class="src-badge'+(en.source==='Call Log'?' call':'')+'">'+esc(en.source)+'</span></td>'+ 
+      '<td class="nowrap">'+buttons+'</td>'+ 
+    '</tr>';
+    }).join('')+'</tbody></table></div>';
 }
+
+ACTIONS['view-edit-history']=async (el,d)=>{
+  openModal('<div class="modal-head"><h2>Company Edit History — '+esc(d.cname||d.cid)+'</h2><button class="modal-x" data-action="close-modal">×</button></div><div class="modal-body" id="edit-history-modal">'+loadingHtml('Loading edit history…')+'</div><div class="modal-foot"><button class="btn" data-action="close-modal">Close</button></div>');
+  try{
+    const data = await api('getCompanyEditHistory',{companyId:d.cid});
+    const rows = data.entries || [];
+    $('#edit-history-modal').innerHTML = rows.length ? '<div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>User</th><th>Changes</th></tr></thead><tbody>'+rows.map(en=>'<tr><td class="nowrap">'+esc(en.timestamp)+'</td><td><b>'+esc(en.user)+'</b></td><td style="max-width:380px">'+esc(en.details||'')+'</td></tr>').join('')+'</tbody></table></div>' : emptyHtml('📝','No company detail edits recorded for this company.');
+  }catch(e){ $('#edit-history-modal').innerHTML='<div class="error-box">⚠ '+esc(e.message)+'</div>'; }
+};
 
 /* ================= MANAGER: COMPANY EDIT HISTORY ====================== */
 
