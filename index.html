@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B14 USERS SETTINGS MANAGER PAGE</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B15 DATA SAFETY / BACKUP / DEPLOYMENT PROTECTION</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B14 USERS SETTINGS MANAGER PAGE</span>
+      <span class="build-tag" id="app-build-tag">B15 DATA SAFETY / BACKUP / DEPLOYMENT PROTECTION</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B14 USERS SETTINGS MANAGER PAGE';
+const APP_BUILD = 'B15 DATA SAFETY / BACKUP / DEPLOYMENT PROTECTION';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -2434,6 +2434,18 @@ async function renderUsers(c){
         '<button class="btn btn-sm" data-action="user-pin" data-code="'+esc(u.code)+'">Reset PIN</button> '+
         '<button class="btn btn-sm '+(u.active?'btn-danger':'')+'" data-action="user-toggle" data-code="'+esc(u.code)+'" data-active="'+u.active+'">'+(u.active?'Deactivate':'Reactivate')+'</button>'+ 
       '</td></tr>').join('')+'</tbody></table></div></div>'+ 
+    '<div class="panel"><div class="section-title"><div><h2>Deployment Safety Check</h2>'+ 
+      '<p style="color:var(--muted);margin-top:2px">Use this after every upload to confirm the frontend can reach the backend and the backend is the expected deployed version.</p></div>'+ 
+      '<button class="btn btn-primary btn-sm" data-action="run-health-check">Run Health Check</button></div>'+ 
+      '<div id="health-check-box" style="color:var(--muted);font-size:13px">Not checked yet.</div></div>'+ 
+    '<div class="panel"><h2>Deployment Protection Rules</h2>'+ 
+      '<div class="stats-grid">'+
+        '<div class="stat"><b>1</b><span>GitHub file must be index.html</span></div>'+ 
+        '<div class="stat"><b>2</b><span>Apps Script must use one active api.gs</span></div>'+ 
+        '<div class="stat"><b>3</b><span>Deploy as new version, same URL</span></div>'+ 
+        '<div class="stat"><b>4</b><span>Confirm UI version after hard refresh</span></div>'+ 
+      '</div>'+ 
+      '<p style="color:var(--muted);margin-top:10px">Do not keep backup .gs files active inside Apps Script. Keep backups as TXT, ZIP, or outside the active Apps Script project.</p></div>'+ 
     '<div class="panel"><h2>Manager tab structure</h2>'+ 
     '<p style="color:var(--muted);margin-bottom:8px">Manager navigation is kept clean: <b>Pipeline Dashboard</b>, <b>Agent Performance</b>, <b>Users / Settings</b>, and <b>Contact Cleanup</b>.</p>'+ 
     '<p style="color:var(--muted)">Work areas such as Bid Pipeline, Meetings Booked, Events Leads, Activity Log, and Company Edit History still open from dashboard drilldowns when needed, but they are no longer permanent manager tabs.</p></div>';
@@ -2465,6 +2477,33 @@ ACTIONS['user-toggle']=async (el,d)=>{
     toast('User '+d.code+(makeActive?' reactivated':' deactivated'),'success');
     renderTab('users');
   }catch(e){ toast(e.message,'error'); el.disabled=false; }
+};
+
+ACTIONS['run-health-check']=async (el)=>{
+  const box=$('#health-check-box');
+  el.disabled=true; el.textContent='Checking…';
+  if(box) box.innerHTML=loadingHtml('Checking backend health…');
+  try{
+    const r=await api('healthCheck',{});
+    const sheetRows=(r.sheets||[]).map(s=>'<tr><td>'+esc(s.sheet)+'</td><td>'+(s.exists?'✓':'⚠')+'</td><td>'+esc(s.rows)+'</td></tr>').join('');
+    const mismatch = String(r.backendVersion||'').indexOf('15.')!==0;
+    if(box) box.innerHTML=
+      '<div class="stats-grid">'+
+        '<div class="stat"><b>'+esc(APP_BUILD)+'</b><span>Frontend build</span></div>'+ 
+        '<div class="stat"><b>'+esc(r.backendVersion||'Unknown')+'</b><span>Backend version</span></div>'+ 
+        '<div class="stat"><b>'+esc(r.companyMasterRows||0)+'</b><span>Company Master rows</span></div>'+ 
+        '<div class="stat"><b>'+esc(r.activeUsers||0)+'</b><span>Active users</span></div>'+ 
+      '</div>'+ 
+      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the B15 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
+      '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Sheet</th><th>Status</th><th>Rows</th></tr></thead><tbody>'+sheetRows+'</tbody></table></div>'+
+      '<p style="color:var(--muted);margin-top:10px"><b>Backup rule:</b> do not keep backup .gs files active inside Apps Script. Keep backups as TXT, ZIP, or outside the Apps Script project.</p>';
+    toast('Health check complete','success');
+  }catch(e){
+    if(box) box.innerHTML='<div class="error-box">⚠ '+esc(e.message)+'</div>';
+    toast(e.message,'error');
+  }finally{
+    el.disabled=false; el.textContent='Run Health Check';
+  }
 };
 ACTIONS['demo-reset']=async (el)=>{
   if(!confirm('Reset ALL demo data? This clears the demo call log, target lists, activity log, events and statuses.')) return;
