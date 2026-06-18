@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B11 COMPANY SEARCH / ADD TARGETS POLISH</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B11.1 COMPANY DATABASE LABEL CLEANUP</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B11 COMPANY SEARCH / ADD TARGETS POLISH</span>
+      <span class="build-tag" id="app-build-tag">B11.1 COMPANY DATABASE LABEL CLEANUP</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B11 COMPANY SEARCH / ADD TARGETS POLISH';
+const APP_BUILD = 'B11.1 COMPANY DATABASE LABEL CLEANUP';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -669,7 +669,7 @@ $('#logout-btn').addEventListener('click', logout);
 const AGENT_TABS = [
   {id:'dash', label:'Dashboard', render: renderAgentDashboard},
   {id:'targets', label:'My Target List', render: renderTargets},
-  {id:'add', label:'Add Targets', render: renderAddTargets},
+  {id:'add', label:'Company Database', render: renderAddTargets},
   {id:'followups', label:'My Follow-Ups', render: renderFollowups},
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
   {id:'meetings', label:'Meetings Booked', render: renderMeetingPipeline},
@@ -811,7 +811,7 @@ function retryAttemptHtml(t){
 }
 
 function targetTable(rows){
-  if(!rows.length) return emptyHtml('🎯','Your target list is empty. Add companies from the Add Targets tab.');
+  if(!rows.length) return emptyHtml('🎯','Your target list is empty. Add companies from the Company Database tab.');
   return '<div class="table-wrap"><table><thead><tr><th>Company</th><th>Phone</th><th>Attempts</th><th>Last Result</th><th>Last Call</th><th>Added</th><th></th></tr></thead><tbody>'+
     rows.map(t=>'<tr>'+
       '<td><b>'+esc(t.companyName)+'</b><br><small style="color:var(--muted)">'+esc(t.companyId)+'</small></td>'+
@@ -1028,16 +1028,14 @@ async function renderAddTargets(c){
   const q=state.queue, f=state.queueFilters;
   c.innerHTML =
     '<div class="panel">'+
-    '<div class="section-title"><div><h2>Company Database — Add Targets ('+q.count+' companies)</h2>'+
+    '<div class="section-title"><div><h2>Company Database ('+q.count+' companies)</h2>'+
     '<p style="color:var(--muted);font-size:12.5px;margin-top:2px">Source: <b>COMPANY MASTER</b>. Adding a target writes only to <b>DAILY ACTION LIST</b>. My Target List does not read the full company database.</p></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
     '<button class="btn btn-primary btn-sm" data-action="company-new">+ Add Company</button>'+
     '<button class="btn btn-sm" data-action="queue-clear-filters">Clear Filters</button>'+
     '<button class="btn btn-sm" data-action="queue-refresh">Reload Database</button>'+
     '</div></div>'+
-    '<div class="reason-note" style="margin-bottom:12px;background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a">'+
-      '<b>B11 Add Targets rule:</b> All categories + no search shows the full COMPANY MASTER. A selected category with no search shows all companies in that category. Search narrows the selected category. Duplicate targets are blocked and remain marked as Already Added.'+
-    '</div>'+
+
     '<div class="filter-bar">'+
       '<div class="field"><label>Category</label><select id="q-cat"><option value="">All categories</option>'+
         q.categories.map(cat=>'<option'+(f.cat===cat?' selected':'')+'>'+esc(cat)+'</option>').join('')+'</select></div>'+
