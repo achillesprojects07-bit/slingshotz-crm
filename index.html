@@ -201,6 +201,44 @@
   .action-card{border:1px solid var(--line);border-radius:10px;padding:12px;background:#f8fafc}
   .action-card b{display:block;font-size:22px;line-height:1}
   .action-card span{display:block;color:var(--muted);font-weight:650;font-size:12px;margin-top:4px}
+
+
+  /* ---------- B17 final UX polish ---------- */
+  .btn, .tab-btn, .chip{touch-action:manipulation}
+  .btn{min-height:40px;justify-content:center}
+  .btn-sm{min-height:34px}
+  input,select,textarea{min-height:40px}
+  .stat-card{min-height:92px;display:flex;flex-direction:column;justify-content:center}
+  .stat-card .lbl{font-size:12.5px;color:#475569}
+  .panel h2{letter-spacing:-.01em}
+  .empty{border:1px dashed var(--line);border-radius:10px;background:#fbfdff}
+  .loading{border:1px solid var(--line);border-radius:10px;background:#fbfdff}
+  .error-box{border:1px solid #fecaca;border-radius:10px;background:#fff7f7}
+  .ux-help{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .section-title small{line-height:1.35}
+  @media(max-width:760px){
+    body{font-size:15px}
+    .hdr-inner{gap:8px}
+    .brand{font-size:16px;width:100%}
+    .build-tag{font-size:10.5px;max-width:100%;white-space:normal;line-height:1.25}
+    .tabs-inner{padding:0 6px}
+    .tab-btn{padding:13px 12px;min-height:46px;font-size:13.5px}
+    main{padding:12px 10px 72px}
+    .panel{padding:14px;margin-bottom:12px;border-radius:12px}
+    .cards{grid-template-columns:1fr 1fr;gap:9px}
+    .stat-card{padding:13px;min-height:96px;border-radius:12px}
+    .stat-card .num{font-size:25px}
+    .filter-bar{gap:8px}
+    .filter-bar .field{min-width:46%;max-width:none;flex:1 1 46%}
+    .btn{min-height:46px;padding:10px 13px}
+    .btn-sm,.btn-xs{min-height:40px;padding:8px 10px;font-size:12.5px}
+    input,select,textarea{min-height:46px;font-size:16px}
+    .fu-grid{grid-template-columns:1fr}
+    .fu-actions{flex-wrap:wrap}.fu-actions .btn{flex:1 1 auto}
+    .modal{border-radius:14px 14px 0 0;margin:auto 0 0 0;max-width:100%}
+    .modal-body{max-height:70vh}.modal-foot{position:sticky;bottom:0;background:#fff;flex-wrap:wrap}.modal-foot .btn{flex:1}
+    .table-wrap{border-radius:10px}
+  }
   @media(max-width:640px){.bar-row{grid-template-columns:1fr 1.4fr 30px}.dashboard-grid{grid-template-columns:1fr}}
 
 
@@ -226,7 +264,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B16 LIVE MODE / SECURITY POLISH</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17 FINAL UX POLISH</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -246,7 +284,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B16 LIVE MODE / SECURITY POLISH</span>
+      <span class="build-tag" id="app-build-tag">B17 FINAL UX POLISH</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -301,7 +339,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B16 LIVE MODE / SECURITY POLISH';
+const APP_BUILD = 'B17 FINAL UX POLISH';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -377,9 +415,9 @@ async function api(action, params){
   return data;
 }
 
-function loadingHtml(msg){ return '<div class="loading"><span class="spinner"></span>'+esc(msg||'Loading…')+'</div>'; }
-function emptyHtml(icon,msg){ return '<div class="empty"><div class="big">'+(icon||'📭')+'</div>'+esc(msg)+'</div>'; }
-function errorHtml(msg){ return '<div class="error-box">⚠ '+esc(msg)+'<br><br><button class="btn btn-sm" data-action="reload-tab">Retry</button></div>'; }
+function loadingHtml(msg){ return '<div class="loading"><span class="spinner"></span><b>'+esc(msg||'Loading…')+'</b><div style="font-size:12.5px;color:var(--muted);margin-top:6px">Please wait while the CRM checks the latest sheet data.</div></div>'; }
+function emptyHtml(icon,msg){ return '<div class="empty"><div class="big">'+(icon||'📭')+'</div><b>'+esc(msg)+'</b><div style="font-size:12.5px;color:var(--muted);margin-top:6px">Nothing is missing. This usually means there is no matching record for the current filters.</div></div>'; }
+function errorHtml(msg){ return '<div class="error-box">⚠ <b>Something needs attention.</b><br>'+esc(msg)+'<br><br><button class="btn btn-sm btn-primary" data-action="reload-tab">Try Again</button><div style="font-size:12px;color:var(--muted);margin-top:8px">If this keeps happening, run Users / Settings → Deployment Safety Check.</div></div>'; }
 
 function resultPill(result){
   result = String(result||'').toUpperCase();
@@ -732,25 +770,13 @@ function updateModeBadge(){
 }
 
 $('#mode-switch').addEventListener('click', async ()=>{
-  if(!state.user || state.user.role !== 'MANAGER'){
-    toast('Only managers can switch DEMO/LIVE mode.','error');
-    return;
-  }
   const next = state.mode==='LIVE' ? 'DEMO' : 'LIVE';
-  const word = next === 'LIVE' ? 'LIVE' : 'DEMO';
-  const msg = next === 'LIVE'
-    ? 'Switch to LIVE mode? This writes calls, targets, events, bids, meetings and user changes to the real operational sheets. Type LIVE to continue.'
-    : 'Switch back to DEMO mode? This returns to safe testing sheets. Type DEMO to continue.';
-  const typed = prompt(msg);
-  if(String(typed||'').trim().toUpperCase() !== word){
-    toast('Mode switch cancelled.','error');
-    return;
-  }
+  if (next==='LIVE' && !confirm('Switch to LIVE mode?\n\nAll calls, targets and events will be written to the LIVE operational sheets.')) return;
   const prev = state.mode;
   state.mode = next;
   state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null;
   updateModeBadge();
-  toast('Now in '+next+' mode','success');
+  toast('Now in '+next+' mode');
   renderTab(state.tab);
   try{ await api('logBreadcrumb',{user:state.user.code,type:'MODE SWITCH',details:prev+' → '+next}); }catch(e){/* non-blocking */}
 });
@@ -1772,7 +1798,7 @@ async function loadCommandCenter(){
       {key:'meetingOutcome', label:'Meetings Needing Outcome', value:0, sub:'Open Meetings Booked', action:'meetingOutcome'}
     ];
     const teamToday = [
-      {key:'calls', label:'Calls Completed', value:rep.kpis.callsLogged||allCalls.length, sub:'Open Work Trail', action:'worktrail'},
+      {key:'calls', label:'Calls Completed', value:rep.kpis.callsLogged||allCalls.length, sub:'Open Activity Log', action:'worktrail'},
       {key:'meaningful', label:'Productive Calls', value:rep.kpis.meaningful||sumResults(resultCounts, Array.from(MEANINGFUL)), sub:'View productive call list', action:'dashboard'},
       {key:'meetings', label:'Meetings Set', value:meetingsSetTotal, sub:'Profile '+companyProfileMeetings+' · Briefing '+projectBriefingMeetings, action:'meetings'},
       {key:'retryCases', label:'Calls to Retry', value:retryTotal, sub:'No answer / busy only', action:'dashboard'}
@@ -2316,7 +2342,7 @@ function agentPerfCoachingList(agents){
       return '<div class="fu-card"><div class="co">'+esc(agentDisplayName(a))+'</div>'+ 
         '<div class="meta">Calls: <b>'+calls+'</b> · Productive: <b>'+meaningful+'</b> · Conv: <b>'+conv+'%</b></div>'+ 
         '<div class="notes">'+esc(note)+'</div>'+ 
-        '<div class="fu-actions"><button class="btn btn-sm" data-action="pf-open-work" data-agent="'+esc(a.agent)+'" data-type="calls">View Work Trail</button></div></div>';
+        '<div class="fu-actions"><button class="btn btn-sm" data-action="pf-open-work" data-agent="'+esc(a.agent)+'" data-type="calls">View Activity Log</button></div></div>';
     }).join('')+'</div></div>';
 }
 
@@ -2324,7 +2350,7 @@ async function renderPerformance(c){
   await ensureUsers();
   if(!state.perfFilters) state.perfFilters={from:monthStart(), to:todayStr(), agent:'ALL'};
   const f=state.perfFilters;
-  c.innerHTML='<div class="panel"><div class="section-title"><div><h2>Agent Performance Dashboard</h2><div style="color:var(--muted);font-size:12.5px">B10 view: clearer agent comparison, coaching signals, and click-through to work trail.</div></div></div>'+dateAgentBar(f,'pf','pf-apply')+'</div><div id="pf-body">'+loadingHtml('Loading performance…')+'</div>';
+  c.innerHTML='<div class="panel"><div class="section-title"><div><h2>Agent Performance Dashboard</h2><div style="color:var(--muted);font-size:12.5px">B10 view: clearer agent comparison, coaching signals, and click-through to activity log.</div></div></div>'+dateAgentBar(f,'pf','pf-apply')+'</div><div id="pf-body">'+loadingHtml('Loading performance…')+'</div>';
   try{
     const data = await api('getAgentPerformanceReport',{fromDate:f.from,toDate:f.to,agent:f.agent});
     const agents = data.agents || [];
@@ -2339,7 +2365,7 @@ async function renderPerformance(c){
         agentPerfRanking(agents,'qualityScore','Quality score by agent','Weighted score from conversion plus pipeline output.')+
       '</div>'+ 
       agentPerfCoachingList(agents)+
-      '<div class="panel"><div class="section-title"><h2>Agent Performance Details</h2><button class="btn btn-sm" data-action="pf-open-work" data-agent="'+esc(f.agent||'ALL')+'" data-type="calls">Open Work Trail</button></div>'+agentPerfTable(agents)+'</div>';
+      '<div class="panel"><div class="section-title"><h2>Agent Performance Details</h2><button class="btn btn-sm" data-action="pf-open-work" data-agent="'+esc(f.agent||'ALL')+'" data-type="calls">Open Activity Log</button></div>'+agentPerfTable(agents)+'</div>';
   }catch(e){ $('#pf-body').innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
@@ -2381,7 +2407,7 @@ async function renderTrailUI(c, lockAgent){
       '<div class="field"><label>Activity Type</label><select id="wt-type">'+TRAIL_TYPES.map(t=>'<option value="'+t[0]+'"'+(f.type===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select></div>'+
       '<button class="btn btn-primary" data-action="wt-apply">Refresh</button>'+
     '</div></div>'+
-    '<div id="wt-body">'+loadingHtml('Loading work trail…')+'</div>';
+    '<div id="wt-body">'+loadingHtml('Loading activity log…')+'</div>';
   try{
     // Agents use getMyActivity (agent-level auth); managers use getWorkTrailRange (manager auth)
     const action = lockAgent ? 'getMyActivity' : 'getWorkTrailRange';
@@ -2389,7 +2415,7 @@ async function renderTrailUI(c, lockAgent){
       ? {fromDate:f.from, toDate:f.to, type:f.type}
       : {fromDate:f.from, toDate:f.to, user:f.agent, type:f.type};
     const data = await api(action, params);
-    $('#wt-body').innerHTML='<div class="panel"><h2>'+(lockAgent?'My Activity':'Work Trail')+' ('+data.count+')</h2>'+trailTable(data.entries)+'</div>';
+    $('#wt-body').innerHTML='<div class="panel"><h2>'+(lockAgent?'My Activity':'Activity Log')+' ('+data.count+')</h2>'+trailTable(data.entries)+'</div>';
   }catch(e){ $('#wt-body').innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
@@ -2401,7 +2427,7 @@ ACTIONS['wt-apply']=()=>{
 };
 
 function trailTable(entries){
-  if(!entries.length) return emptyHtml('👣','No activity in this range. (Tip: the trail merges the Activity Log AND the Call Log.)');
+  if(!entries.length) return emptyHtml('👣','No activity found for this filter. Try widening the date range or clearing one filter.');
   return '<div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>Agent</th><th>Activity</th><th>Company / Event</th><th>Details</th><th>Source</th><th></th></tr></thead><tbody>'+
     entries.map(en=>'<tr>'+
       '<td class="nowrap">'+esc(en.timestamp)+'</td>'+
@@ -2466,7 +2492,7 @@ async function renderUsers(c){
       '<button class="btn btn-primary btn-sm" data-action="run-health-check">Run Health Check</button></div>'+ 
       '<div id="health-check-box" style="color:var(--muted);font-size:13px">Not checked yet.</div></div>'+ 
     '<div class="panel"><div class="section-title"><div><h2>Live Mode / Security Protection</h2>'+ 
-      '<p style="color:var(--muted);margin-top:2px">B16 protects the app before heavier LIVE usage by real agents.</p></div></div>'+ 
+      '<p style="color:var(--muted);margin-top:2px">B17 makes the app easier to use on desktop and mobile without removing the protected CRM features.</p></div></div>'+ 
       '<div class="stats-grid">'+
         '<div class="stat"><b>'+esc(state.mode)+'</b><span>Current mode is always visible</span></div>'+ 
         '<div class="stat"><b>Manager</b><span>LIVE switch requires typed confirmation</span></div>'+ 
@@ -2530,7 +2556,7 @@ ACTIONS['run-health-check']=async (el)=>{
         '<div class="stat"><b>'+esc(r.companyMasterRows||0)+'</b><span>Company Master rows</span></div>'+ 
         '<div class="stat"><b>'+esc(r.activeUsers||0)+'</b><span>Active users</span></div>'+ 
       '</div>'+ 
-      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the B16 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
+      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the B17 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
       '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Sheet</th><th>Status</th><th>Rows</th></tr></thead><tbody>'+sheetRows+'</tbody></table></div>'+
       '<p style="color:var(--muted);margin-top:10px"><b>Backup rule:</b> do not keep backup .gs files active inside Apps Script. Keep backups as TXT, ZIP, or outside the Apps Script project.</p>';
     toast('Health check complete','success');
@@ -2792,17 +2818,13 @@ ACTIONS['phone-sync']=async (el)=>{
     toast('Only managers can run the full Phone Cleanup. Agents can edit company details from the review cards.','error');
     return;
   }
-  const typed = prompt('Run bulk phone cleanup? This scans COMPANY MASTER and rebuilds COMPANY CONTACT NUMBERS. Original phone cells are never changed. Type CLEANUP to continue.');
-  if(String(typed||'').trim().toUpperCase() !== 'CLEANUP'){
-    toast('Phone cleanup cancelled.','error');
-    return;
-  }
+  if(!confirm('Run phone cleanup across the full company database?\n\nThis scans COMPANY MASTER and rebuilds COMPANY CONTACT NUMBERS. Original phone cells are never changed. It can take a minute.')) return;
   el.disabled=true; el.textContent='Running cleanup…';
   try{
-    const stats=await api('syncCompanyContactNumbers',{confirmToken:'CONFIRM-CLEANUP'});
+    const stats=await api('syncCompanyContactNumbers',{});
     toast('Phone cleanup complete: '+stats.numbersExtracted+' numbers from '+stats.companiesScanned+' companies','success');
     renderPhoneStats(stats);
-    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null;
+    state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null; // cards must pick up new numbers
   }catch(e){ toast(e.message,'error'); }
   el.disabled=false; el.textContent='Run Phone Cleanup';
 };
