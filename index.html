@@ -264,7 +264,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17 FINAL UX POLISH</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.1 AUDIT SAFETY PATCH</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -284,7 +284,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17 FINAL UX POLISH</span>
+      <span class="build-tag" id="app-build-tag">B17.1 AUDIT SAFETY PATCH</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -339,7 +339,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17 FINAL UX POLISH';
+const APP_BUILD = 'B17.1 AUDIT SAFETY PATCH';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -2821,7 +2821,7 @@ ACTIONS['phone-sync']=async (el)=>{
   if(!confirm('Run phone cleanup across the full company database?\n\nThis scans COMPANY MASTER and rebuilds COMPANY CONTACT NUMBERS. Original phone cells are never changed. It can take a minute.')) return;
   el.disabled=true; el.textContent='Running cleanup…';
   try{
-    const stats=await api('syncCompanyContactNumbers',{});
+    const stats=await api('syncCompanyContactNumbers',{confirmToken:'CONFIRM-CLEANUP'});
     toast('Phone cleanup complete: '+stats.numbersExtracted+' numbers from '+stats.companiesScanned+' companies','success');
     renderPhoneStats(stats);
     state.queue=null; state.lastReport=null; state.lastMgrReport=null; state.bidFilters=null; state.meetingFilters=null; // cards must pick up new numbers
