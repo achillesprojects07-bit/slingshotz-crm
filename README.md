@@ -1,20 +1,18 @@
-SLINGSHOTZ CRM — B16 LIVE MODE / SECURITY POLISH
+SLINGSHOTZ CRM — B17 FINAL UX POLISH
 
-Build: B16 LIVE MODE / SECURITY POLISH
-Backend version: 16.0.0
-Base preserved from: B15 + all locked B8.8/B9.1/B10/B11/B12/B13/B14 features
+Build: B17 FINAL UX POLISH
+Backend APP_VERSION: 17.0.0
 
-WHAT CHANGED
-1. DEMO vs LIVE mode is clearer in the UI.
-2. LIVE/DEMO switch now requires manager access and typed confirmation.
-3. Bulk Phone Cleanup requires manager access plus typed CLEANUP confirmation in the app.
-4. Backend also requires CONFIRM-CLEANUP for bulk phone cleanup.
-5. Demo reset requires manager access and typed RESET DEMO confirmation.
-6. COMPANY MASTER protection is stated clearly in health/security checks.
-7. Users / Settings includes Live Mode / Security Protection notes.
-8. Health Check now expects backend version 16.x.
+Purpose:
+Final usability polish before broader real-agent use. This build improves mobile layout, tap targets, loading messages, empty states, button wording, and error guidance without removing protected CRM features.
 
-PRESERVED
+Files to upload:
+1. GitHub index.html = Slingshotz_index_B17_FINAL_UX_POLISH.html
+2. Apps Script api.gs = api_build17_FINAL_UX_POLISH_COPY_PASTE.txt
+3. GitHub README = this README file
+
+Preserved from earlier builds:
+- B16 Live Mode / Security Polish
 - B15 Deployment Safety / Health Check
 - B14 Users / Settings Manager Page
 - B13 Events Leads Upgrade
@@ -29,20 +27,16 @@ PRESERVED
 - B6 Meetings Booked flow
 - B5 Bid import / auto-create
 - B4 Contact Cleanup
-- Branded HTML meeting email template
-- Correct API_URL
+- branded HTML meeting email template
+- correct API_URL
 
-DEPLOYMENT CHECKLIST
-1. GitHub: replace index.html with Slingshotz_index_B16_LIVE_MODE_SECURITY_POLISH.html
-2. GitHub: keep this README beside index.html.
-3. Apps Script: replace only api.gs with api_build16_LIVE_MODE_SECURITY_POLISH_COPY_PASTE.txt content.
-4. Do not add backup .gs files inside Apps Script.
-5. Save Apps Script.
-6. Deploy > Manage deployments > Edit pencil > New version > Deploy.
-7. Hard refresh CRM.
-8. Confirm UI shows B16 LIVE MODE / SECURITY POLISH.
-9. Go to Users / Settings > Run Health Check.
-10. Confirm backend version is 16.0.0.
-
-IMPORTANT
-Backups must stay outside active Apps Script, as TXT/ZIP/GitHub files. Apps Script should only have active api.gs unless intentionally modularized.
+Deployment checklist:
+[ ] Replace GitHub index.html only with B17 frontend
+[ ] Upload this README beside index.html
+[ ] Replace Apps Script api.gs only with B17 backend
+[ ] Do not keep backup .gs files active inside Apps Script
+[ ] Save Apps Script
+[ ] Deploy → Manage deployments → pencil/edit → New version → Deploy
+[ ] Hard refresh CRM
+[ ] Confirm UI shows B17 FINAL UX POLISH
+[ ] Users / Settings → Deployment Safety Check → Run Health Check
