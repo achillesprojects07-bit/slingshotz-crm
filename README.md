@@ -1,17 +1,29 @@
-SLINGSHOTZ CRM — B17 FINAL UX POLISH
+SLINGSHOTZ CRM — B17.1 AUDIT SAFETY PATCH
 
-Build: B17 FINAL UX POLISH
-Backend APP_VERSION: 17.0.0
+Build: B17.1 AUDIT SAFETY PATCH
+Frontend file: Slingshotz_index_B17_1_AUDIT_SAFETY_PATCH.html
+Backend file: api_build17_1_AUDIT_SAFETY_PATCH_COPY_PASTE.txt / api_build17_1_AUDIT_SAFETY_PATCH.gs
+Base preserved: B17 FINAL UX POLISH + all prior protected features
 
-Purpose:
-Final usability polish before broader real-agent use. This build improves mobile layout, tap targets, loading messages, empty states, button wording, and error guidance without removing protected CRM features.
+PURPOSE
+This build addresses the audit findings except the two items the owner explicitly confirmed as intentional:
+- Upsert Company access for authenticated users is intentional.
+- CONTACT PERSON NOT AVAILABLE as follow-up/nurture, not retry-cap, is intentional.
 
-Files to upload:
-1. GitHub index.html = Slingshotz_index_B17_FINAL_UX_POLISH.html
-2. Apps Script api.gs = api_build17_FINAL_UX_POLISH_COPY_PASTE.txt
-3. GitHub README = this README file
+FIXED IN B17.1
+1. seedUsers_ now writes DAILY TARGET = 40 into the USERS seed rows.
+2. Health Check now checks EVENT MASTER, not a non-existent EVENT LEADS sheet.
+3. Frontend phone cleanup now sends confirmToken: CONFIRM-CLEANUP.
+4. verifyUser_ no longer blocks all normal session routes because of lockout; lockout remains enforced at login and manager-only actions.
+5. DAILY_TARGET is now 40 to match per-user daily target defaults.
+6. Added setupDailySummaryTrigger() so the DAILY SUMMARY refresh trigger can be created properly.
+7. Demo Reset now also clears DEMO BID PIPELINE and DEMO MEETING PIPELINE.
+8. Company edit/add now clears the phoneMap cache after phone/contact changes.
+9. importBiddingRequirements is now manager-only.
+10. DAILY SUMMARY remains one shared sheet with a MODE column by design. Managers should filter by DEMO/LIVE.
 
-Preserved from earlier builds:
+PRESERVED
+- B17 Final UX Polish
 - B16 Live Mode / Security Polish
 - B15 Deployment Safety / Health Check
 - B14 Users / Settings Manager Page
@@ -27,16 +39,17 @@ Preserved from earlier builds:
 - B6 Meetings Booked flow
 - B5 Bid import / auto-create
 - B4 Contact Cleanup
-- branded HTML meeting email template
-- correct API_URL
+- Branded HTML meeting email template
+- Correct API_URL
 
-Deployment checklist:
-[ ] Replace GitHub index.html only with B17 frontend
-[ ] Upload this README beside index.html
-[ ] Replace Apps Script api.gs only with B17 backend
-[ ] Do not keep backup .gs files active inside Apps Script
-[ ] Save Apps Script
-[ ] Deploy → Manage deployments → pencil/edit → New version → Deploy
-[ ] Hard refresh CRM
-[ ] Confirm UI shows B17 FINAL UX POLISH
-[ ] Users / Settings → Deployment Safety Check → Run Health Check
+DEPLOYMENT CHECKLIST
+1. GitHub: replace index.html with the B17.1 frontend file.
+2. GitHub: upload this README beside index.html.
+3. Apps Script: replace only api.gs with the B17.1 backend copy-paste file.
+4. Do not keep backup .gs files inside Apps Script.
+5. Apps Script: Save.
+6. Deploy > Manage deployments > pencil/edit > New version > Deploy.
+7. Hard refresh the CRM.
+8. Confirm the UI shows: B17.1 AUDIT SAFETY PATCH.
+9. Users / Settings > Deployment Safety Check > Run Health Check.
+10. Optional: Run setupDailySummaryTrigger once in Apps Script if DAILY SUMMARY auto-refresh is needed.
