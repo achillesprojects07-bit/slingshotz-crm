@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B12 ACTIVITY LOG / CALL HISTORY UPGRADE</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B13 EVENTS LEADS UPGRADE</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B12 ACTIVITY LOG / CALL HISTORY UPGRADE</span>
+      <span class="build-tag" id="app-build-tag">B13 EVENTS LEADS UPGRADE</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B12 ACTIVITY LOG / CALL HISTORY UPGRADE';
+const APP_BUILD = 'B13 EVENTS LEADS UPGRADE';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -330,7 +330,7 @@ const state = {
   trailFilters: null,
   bidFilters: null,
   meetingFilters: null,
-  eventFilters: { search:'', category:'', venue:'', range:'all' },
+  eventFilters: { search:'', category:'', venue:'', range:'all', source:'', leadStatus:'', company:'' },
   cleanupKind: '',
   lastReport: null,      // agent dashboard report cache
   lastMgrReport: null
@@ -1233,17 +1233,20 @@ const PROSPECT_STATUSES=['NOT STARTED','IN PROGRESS','DONE'];
 
 async function renderEvents(c){
   const f=state.eventFilters;
-  const data = await api('getEvents', {search:f.search, category:f.category, venue:f.venue, range:f.range});
+  const data = await api('getEvents', {search:f.search, category:f.category, venue:f.venue, range:f.range, source:f.source||'', leadStatus:f.leadStatus||'', company:f.company||''});
   const isMgr = state.user.role === 'MANAGER';
   const canAdd = isMgr || state.user.canAddEvents;
-  c.innerHTML = (isMgr ? finderPanelHtml() : '') +
+  c.innerHTML = (isMgr ? upcomingClientEventsPanel(data.events) + finderPanelHtml() : '') +
     '<div class="panel">'+
-    '<div class="section-title"><h2>Events Leads ('+data.count+') <small style="color:var(--muted);font-weight:400">· '+esc(data.sheet)+'</small></h2>'+
+    '<div class="section-title"><h2>Events Leads — Sales Triggers ('+data.count+') <small style="color:var(--muted);font-weight:400">· '+esc(data.sheet)+'</small></h2>'+
       (canAdd?'<button class="btn btn-primary btn-sm" data-action="event-new">+ Add Event Lead</button>':'')+'</div>'+
     '<div class="filter-bar">'+
       '<div class="field" style="max-width:260px"><label>Search</label><input id="ev-search" value="'+esc(f.search)+'" placeholder="Event, organizer, industry…"></div>'+
       '<div class="field"><label>Category</label><select id="ev-cat"><option value="">All</option>'+data.categories.map(x=>'<option'+(f.category===x?' selected':'')+'>'+esc(x)+'</option>').join('')+'</select></div>'+
       '<div class="field"><label>Venue</label><select id="ev-venue"><option value="">All</option>'+data.venues.map(x=>'<option'+(f.venue===x?' selected':'')+'>'+esc(x)+'</option>').join('')+'</select></div>'+
+      '<div class="field"><label>Event Source</label><select id="ev-source"><option value="">All sources</option>'+['SMX','WTC','WTCA','PMA','MANUAL'].map(x=>'<option value="'+x+'"'+((String(f.source||'').toUpperCase())===x?' selected':'')+'>'+x+'</option>').join('')+'</select></div>'+
+      '<div class="field"><label>Lead Status</label><select id="ev-lead-status"><option value="">All statuses</option>'+LEAD_STATUSES.map(x=>'<option value="'+esc(x)+'"'+((String(f.leadStatus||'').toUpperCase())===x?' selected':'')+'>'+esc(x)+'</option>').join('')+'</select></div>'+
+      '<div class="field"><label>Linked Company</label><input id="ev-company" value="'+esc(f.company||'')+'" placeholder="Company name or ID..."></div>'+
       '<div class="field"><label>Planning Range</label><select id="ev-range">'+EVENT_RANGES.map(r=>'<option value="'+r[0]+'"'+(f.range===r[0]?' selected':'')+'>'+r[1]+'</option>').join('')+'</select></div>'+
       '<button class="btn btn-sm" data-action="reload-tab">Apply / Refresh</button>'+
     '</div>'+
@@ -1252,9 +1255,42 @@ async function renderEvents(c){
   $('#ev-search').addEventListener('change', e=>{ f.search=e.target.value.trim(); renderTab(state.tab); });
   $('#ev-cat').addEventListener('change', e=>{ f.category=e.target.value; renderTab(state.tab); });
   $('#ev-venue').addEventListener('change', e=>{ f.venue=e.target.value; renderTab(state.tab); });
+  $('#ev-source').addEventListener('change', e=>{ f.source=e.target.value; renderTab(state.tab); });
+  $('#ev-lead-status').addEventListener('change', e=>{ f.leadStatus=e.target.value; renderTab(state.tab); });
+  $('#ev-company').addEventListener('change', e=>{ f.company=e.target.value.trim(); renderTab(state.tab); });
   $('#ev-range').addEventListener('change', e=>{ f.range=e.target.value; renderTab(state.tab); });
   state.eventsCache = data.events;
   if (isMgr) initFinderPanel(data.events);
+}
+
+
+function sourceBadge(ev){
+  const s=String(ev.source||'MANUAL').toUpperCase();
+  const known=['SMX','WTC','WTCA','PMA','MANUAL'];
+  const clean=known.find(x=>s.indexOf(x)!==-1) || (s||'MANUAL');
+  return '<span class="pill pill-neutral">'+esc(clean)+'</span>';
+}
+function linkedCompanyHtml(ev){
+  const id=ev.linkedCompanyId||ev.companyId||'';
+  const name=ev.linkedCompanyName||ev.companyName||'';
+  if(!id && !name) return '<span style="color:var(--muted)">Not linked yet</span>';
+  return '<b>'+esc(name||id)+'</b>'+(id?'<br><small style="color:var(--muted)">'+esc(id)+'</small>':'')+
+    '<br><button class="btn btn-xs" data-action="view-history" data-cid="'+esc(id)+'" data-cname="'+esc(name)+'">Call History</button>';
+}
+function upcomingClientEventsPanel(events){
+  const upcoming=(events||[]).filter(ev=>ev.daysUntilEvent!=='' && Number(ev.daysUntilEvent)>=0 && Number(ev.daysUntilEvent)<=45)
+    .sort((a,b)=>Number(a.daysUntilEvent)-Number(b.daysUntilEvent)).slice(0,8);
+  return '<div class="panel"><div class="section-title"><h2>Upcoming Client Events</h2><small style="color:var(--muted);font-weight:700">Manager sales triggers · next 45 days</small></div>'+ 
+    (upcoming.length ? '<div class="fu-grid">'+upcoming.map(ev=>'<div class="fu-card fu-urgent">'+
+      '<div class="co">'+esc(ev.eventName)+'</div>'+ 
+      '<div class="meta"><b>Event date:</b> '+esc(ev.startDate||'?')+(ev.endDate&&ev.endDate!==ev.startDate?' → '+esc(ev.endDate):'')+'</div>'+ 
+      '<div class="due due-today">'+esc(ev.daysUntilEvent)+' day'+(Number(ev.daysUntilEvent)===1?'':'s')+' until event</div>'+ 
+      '<div class="meta"><b>Prospecting start:</b> '+esc(ev.prospectingStartDate||'Not set')+' · '+sourceBadge(ev)+'</div>'+ 
+      '<div class="meta"><b>Status:</b> '+esc(ev.leadStatus||'NEW')+(ev.linkedCompanyName?' · '+esc(ev.linkedCompanyName):'')+'</div>'+ 
+      '<div class="fu-actions"><button class="btn btn-sm" data-action="event-edit" data-eid="'+esc(ev.eventId)+'">Review Event</button>'+ 
+      (ev.linkedCompanyId?'<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(ev.linkedCompanyId)+'" data-cname="'+esc(ev.linkedCompanyName||'')+'">Company History</button>':'')+'</div>'+ 
+    '</div>').join('')+'</div>' : emptyHtml('🎪','No manager event triggers in the next 45 days.'))+
+  '</div>';
 }
 
 /* ==================== PUBLIC EVENT FINDER (manager) ==================== */
@@ -1451,22 +1487,22 @@ function eventTable(events){
   if(!events.length) return emptyHtml('🎪','No event leads in this range yet.');
   const isMgr = state.user.role==='MANAGER';
   const canAdd = isMgr || state.user.canAddEvents;
-  return '<div class="table-wrap"><table><thead><tr><th>Event</th><th>Dates</th><th>Days Until</th><th>Venue / Organizer</th><th>Target Industry</th><th>Lead Status</th><th>Score</th><th>Prospecting</th><th></th></tr></thead><tbody>'+
-    events.map(ev=>'<tr>'+
-      '<td><b>'+esc(ev.eventName)+'</b><br><small style="color:var(--muted)">'+esc(ev.category||'')+' · '+esc(ev.eventId)+'</small>'+
-        (ev.sourceUrl?'<br><a href="'+esc(ev.sourceUrl)+'" target="_blank" rel="noopener" style="font-size:12px">Source ↗</a>':'')+'</td>'+
-      '<td class="nowrap">'+esc(ev.startDate||'?')+(ev.endDate?'<br>→ '+esc(ev.endDate):'')+'</td>'+
-      '<td>'+(ev.daysUntilEvent!==''?'<span class="pill '+(ev.daysUntilEvent<=30?'pill-retry':'pill-neutral')+'">'+ev.daysUntilEvent+' days</span>':'—')+'</td>'+
-      '<td>'+esc(ev.venue||'—')+(ev.organizer?'<br><small style="color:var(--muted)">'+esc(ev.organizer)+'</small>':'')+'</td>'+
-      '<td>'+esc(ev.targetIndustry||'—')+(ev.possibleRequirements?'<br><small style="color:var(--muted)">'+esc(ev.possibleRequirements)+'</small>':'')+'</td>'+
-      '<td><span class="pill pill-neutral">'+esc(ev.leadStatus||'NEW')+'</span>'+(ev.reviewStatus&&ev.reviewStatus!=='VERIFIED'?'<br><span class="pill pill-retry" style="margin-top:3px">'+esc(ev.reviewStatus)+'</span>':'')+'</td>'+
-      '<td>'+scorePill(ev)+'</td>'+
-      '<td>'+esc(ev.prospectingStatus||'—')+(ev.prospectingStartDate?'<br><small>'+esc(ev.prospectingStartDate)+'</small>':'')+'</td>'+
+  return '<div class="table-wrap"><table><thead><tr><th>Event / Date</th><th>Source</th><th>Days Until</th><th>Prospecting</th><th>Linked Company</th><th>Venue / Organizer</th><th>Lead Status</th><th>Score</th><th></th></tr></thead><tbody>'+ 
+    events.map(ev=>'<tr>'+ 
+      '<td><b>'+esc(ev.eventName)+'</b><br><small style="color:var(--muted)">Event date: '+esc(ev.startDate||'?')+(ev.endDate&&ev.endDate!==ev.startDate?' → '+esc(ev.endDate):'')+'</small><br><small style="color:var(--muted)">'+esc(ev.category||'')+' · '+esc(ev.eventId)+'</small>'+
+        (ev.sourceUrl?'<br><a href="'+esc(ev.sourceUrl)+'" target="_blank" rel="noopener" style="font-size:12px">Open source ↗</a>':'')+'</td>'+ 
+      '<td>'+sourceBadge(ev)+'</td>'+ 
+      '<td>'+(ev.daysUntilEvent!==''?'<span class="pill '+(ev.daysUntilEvent<=30?'pill-retry':'pill-neutral')+'">'+ev.daysUntilEvent+' days</span>':'—')+'</td>'+ 
+      '<td><b>Start:</b> '+esc(ev.prospectingStartDate||'Not set')+'<br><small style="color:var(--muted)">'+esc(ev.prospectingStatus||'NOT STARTED')+'</small></td>'+ 
+      '<td>'+linkedCompanyHtml(ev)+'</td>'+ 
+      '<td>'+esc(ev.venue||'—')+(ev.organizer?'<br><small style="color:var(--muted)">'+esc(ev.organizer)+'</small>':'')+'</td>'+ 
+      '<td><span class="pill pill-neutral">'+esc(ev.leadStatus||'NEW')+'</span>'+(ev.reviewStatus&&ev.reviewStatus!=='VERIFIED'?'<br><span class="pill pill-retry" style="margin-top:3px">'+esc(ev.reviewStatus)+'</span>':'')+'</td>'+ 
+      '<td>'+scorePill(ev)+'</td>'+ 
       '<td class="nowrap">'+
         '<button class="btn btn-sm btn-ghost" data-action="ev-find-companies" data-eid="'+esc(ev.eventId)+'">Find Companies</button> '+
         (canAdd?'<button class="btn btn-sm" data-action="event-edit" data-eid="'+esc(ev.eventId)+'">Edit</button> ':'')+
         (canAdd?'<button class="btn btn-sm btn-danger" data-action="event-delete" data-eid="'+esc(ev.eventId)+'" data-ename="'+esc(ev.eventName)+'">Delete</button>':'')+
-      '</td>'+
+      '</td>'+ 
     '</tr>').join('')+'</tbody></table></div>';
 }
 
@@ -1501,8 +1537,10 @@ function openEventModal(ev){
       '<div><label>Start Date</label><input id="evm-start" type="date" value="'+esc(ev.startDate||'')+'"></div>'+
       '<div><label>End Date</label><input id="evm-end" type="date" value="'+esc(ev.endDate||'')+'"></div>'+
       '<div class="full"><label>Venue</label><input id="evm-venue" value="'+esc(ev.venue||'')+'"></div>'+
-      '<div><label>Source</label><input id="evm-source" value="'+esc(ev.source||'')+'" placeholder="Website, FB, referral…"></div>'+
+      '<div><label>Event Source</label><select id="evm-source">'+['MANUAL','SMX','WTC','WTCA','PMA'].map(s=>'<option value="'+s+'"'+((String(ev.source||'MANUAL').toUpperCase()===s)?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
       '<div><label>Source URL</label><input id="evm-url" value="'+esc(ev.sourceUrl||'')+'"></div>'+
+      '<div><label>Linked Company ID</label><input id="evm-linked-id" value="'+esc(ev.linkedCompanyId||'')+'" placeholder="SL-0001"></div>'+
+      '<div><label>Linked Company Name</label><input id="evm-linked-name" value="'+esc(ev.linkedCompanyName||'')+'" placeholder="Company name"></div>'+
       '<div><label>Target Industry</label><input id="evm-industry" value="'+esc(ev.targetIndustry||'')+'"></div>'+
       '<div><label>Possible Requirements</label><input id="evm-req" value="'+esc(ev.possibleRequirements||'')+'" placeholder="Booths, manpower, sampling…"></div>'+
       '<div><label>Lead Status</label><select id="evm-status">'+LEAD_STATUSES.map(s=>'<option'+((ev.leadStatus||'NEW')===s?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
@@ -1525,6 +1563,7 @@ ACTIONS['event-save'] = async (el,d)=>{
       eventName: name, category: $('#evm-cat').value.trim(), organizer: $('#evm-org').value.trim(),
       startDate: $('#evm-start').value, endDate: $('#evm-end').value, venue: $('#evm-venue').value.trim(),
       source: $('#evm-source').value.trim(), sourceUrl: $('#evm-url').value.trim(),
+      linkedCompanyId: $('#evm-linked-id').value.trim(), linkedCompanyName: $('#evm-linked-name').value.trim(),
       targetIndustry: $('#evm-industry').value.trim(), possibleRequirements: $('#evm-req').value.trim(),
       leadStatus: $('#evm-status').value, prospectingStatus: $('#evm-pstatus').value,
       prospectingStartDate: $('#evm-pstart').value, notes: $('#evm-notes').value.trim(),
@@ -1534,7 +1573,7 @@ ACTIONS['event-save'] = async (el,d)=>{
     });
     // Per spec: close modal, clear filters, range = all future, reload, toast.
     closeModal();
-    state.eventFilters = { search:'', category:'', venue:'', range:'all' };
+    state.eventFilters = { search:'', category:'', venue:'', range:'all', source:'', leadStatus:'', company:'' };
     toast('Event lead saved','success');
     renderTab(state.tab);
   }catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Event Lead'; }
@@ -2288,14 +2327,8 @@ ACTIONS['pf-open-work']=(el,d)=>{
 /* ======================== MANAGER: WORK TRAIL ========================= */
 
 const TRAIL_TYPES=[
-  ['all','All activity except removed targets'],
-  ['calls','Calls Logged'],
-  ['targets_added','Targets Added'],
-  ['targets_removed','Removed Targets (audit only)'],
-  ['company_edits','Company Detail Edits'],
-  ['events','Events Added / Updated'],
-  ['users','Users Updated'],
-  ['app','Login / App Activity']
+  ['all','All'],['calls','Calls Logged'],['targets_added','Targets Added'],['targets_removed','Targets Removed'],
+  ['company_edits','Companies Edited'],['events','Events Added'],['users','Users Updated'],['app','Login / App Activity']
 ];
 
 async function renderWorkTrail(c){
@@ -2309,77 +2342,46 @@ async function renderWorkTrail(c){
 async function renderTrailUI(c, lockAgent){
   const f=state.trailFilters;
   f.locked = lockAgent;
-  if(f.company==null) f.company='';
-  if(f.result==null) f.result='';
   c.innerHTML =
-    '<div class="panel"><div class="section-title"><div><h2>'+(lockAgent?'My Activity Log':'Activity Log')+'</h2><div style="color:var(--muted);font-size:12.5px">B12 view: filter by agent, company, call result, activity type, and date. Removed targets are hidden from All activity to avoid clutter.</div></div></div>'+ 
-    '<div class="filter-bar">'+
-      '<div class="field"><label>From Date</label><input type="date" id="wt-from" value="'+esc(f.from)+'"></div>'+ 
-      '<div class="field"><label>To Date</label><input type="date" id="wt-to" value="'+esc(f.to)+'"></div>'+ 
+    '<div class="panel"><div class="filter-bar">'+
+      '<div class="field"><label>From Date</label><input type="date" id="wt-from" value="'+esc(f.from)+'"></div>'+
+      '<div class="field"><label>To Date</label><input type="date" id="wt-to" value="'+esc(f.to)+'"></div>'+
       (lockAgent?'':'<div class="field"><label>Agent</label><select id="wt-agent">'+agentOptions(f.agent)+'</select></div>')+
-      '<div class="field" style="min-width:190px"><label>Company</label><input id="wt-company" value="'+esc(f.company||'')+'" placeholder="Company name or ID..."></div>'+ 
-      '<div class="field"><label>Call Result</label><select id="wt-result"><option value="">All results</option>'+CALL_RESULTS.map(r=>'<option value="'+esc(r)+'"'+(String(f.result||'').toUpperCase()===r?' selected':'')+'>'+esc(r)+'</option>').join('')+'</select></div>'+ 
-      '<div class="field"><label>Activity Type</label><select id="wt-type">'+TRAIL_TYPES.map(t=>'<option value="'+t[0]+'"'+(f.type===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select></div>'+ 
-      '<button class="btn btn-primary" data-action="wt-apply">Refresh</button>'+ 
-      '<button class="btn" data-action="wt-clear">Clear Filters</button>'+ 
-    '</div>'+ 
-    '<div class="quick-ranges"><button class="chip" data-action="wt-quick" data-q="today">Today</button><button class="chip" data-action="wt-quick" data-q="7">Last 7 days</button><button class="chip" data-action="wt-quick" data-q="30">Last 30 days</button><button class="chip" data-action="wt-quick" data-q="month">This month</button></div>'+ 
-    '</div>'+ 
-    '<div id="wt-body">'+loadingHtml('Loading activity log…')+'</div>';
+      '<div class="field"><label>Activity Type</label><select id="wt-type">'+TRAIL_TYPES.map(t=>'<option value="'+t[0]+'"'+(f.type===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select></div>'+
+      '<button class="btn btn-primary" data-action="wt-apply">Refresh</button>'+
+    '</div></div>'+
+    '<div id="wt-body">'+loadingHtml('Loading work trail…')+'</div>';
   try{
+    // Agents use getMyActivity (agent-level auth); managers use getWorkTrailRange (manager auth)
     const action = lockAgent ? 'getMyActivity' : 'getWorkTrailRange';
     const params = lockAgent
-      ? {fromDate:f.from, toDate:f.to, type:f.type, company:f.company||'', result:f.result||''}
-      : {fromDate:f.from, toDate:f.to, agent:f.agent, user:f.agent, type:f.type, company:f.company||'', result:f.result||''};
+      ? {fromDate:f.from, toDate:f.to, type:f.type}
+      : {fromDate:f.from, toDate:f.to, user:f.agent, type:f.type};
     const data = await api(action, params);
-    $('#wt-body').innerHTML='<div class="panel"><div class="section-title"><div><h2>'+(lockAgent?'My Activity Log':'Activity Log')+' ('+data.count+')</h2><div style="color:var(--muted);font-size:12.5px">Use History to view the complete company call history. Managers can also open Company Edit History.</div></div></div>'+trailTable(data.entries)+'</div>';
+    $('#wt-body').innerHTML='<div class="panel"><h2>'+(lockAgent?'My Activity':'Work Trail')+' ('+data.count+')</h2>'+trailTable(data.entries)+'</div>';
   }catch(e){ $('#wt-body').innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
 ACTIONS['wt-apply']=()=>{
   const f=state.trailFilters;
   f.from=$('#wt-from').value; f.to=$('#wt-to').value; f.type=$('#wt-type').value;
-  f.company=$('#wt-company') ? $('#wt-company').value.trim() : '';
-  f.result=$('#wt-result') ? $('#wt-result').value : '';
   const sel=$('#wt-agent'); if(sel) f.agent=sel.value;
   renderTrailUI($('#tab-content'), f.locked);
 };
-ACTIONS['wt-clear']=()=>{
-  const locked = state.trailFilters && state.trailFilters.locked;
-  const agent = locked ? state.user.code : 'ALL';
-  state.trailFilters={from:addDays(-6),to:todayStr(),agent:agent,type:'all',company:'',result:'',locked:locked};
-  renderTrailUI($('#tab-content'), locked);
-};
-ACTIONS['wt-quick']=(el,d)=>{ quickRange(state.trailFilters,d.q); renderTrailUI($('#tab-content'), state.trailFilters.locked); };
 
 function trailTable(entries){
-  if(!entries.length) return emptyHtml('👣','No activity found for these filters. Removed targets are hidden from All activity; select Removed Targets (audit only) when you need to audit removals.');
-  return '<div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>Agent</th><th>Activity</th><th>Company / Event</th><th>Details</th><th>Source</th><th>Actions</th></tr></thead><tbody>'+ 
-    entries.map(en=>{
-      const companyName = en.company || '';
-      const buttons = en.companyId
-        ? callActions(en.companyId, companyName).replace('History</button>','Call History</button>') + (state.user && state.user.role==='MANAGER' ? ' <button class="btn btn-sm" data-action="view-edit-history" data-cid="'+esc(en.companyId)+'" data-cname="'+esc(companyName)+'">Edit History</button>' : '')
-        : '';
-      return '<tr>'+ 
-      '<td class="nowrap">'+esc(en.timestamp)+'</td>'+ 
-      '<td><b>'+esc(en.agent)+'</b></td>'+ 
-      '<td><span class="pill pill-neutral">'+esc(en.type)+'</span></td>'+ 
-      '<td>'+esc(companyName||'—')+(en.companyId?'<br><small style="color:var(--muted)">'+esc(en.companyId)+'</small>':'')+'</td>'+ 
-      '<td style="max-width:320px">'+esc(en.details||'')+'</td>'+ 
-      '<td><span class="src-badge'+(en.source==='Call Log'?' call':'')+'">'+esc(en.source)+'</span></td>'+ 
-      '<td class="nowrap">'+buttons+'</td>'+ 
-    '</tr>';
-    }).join('')+'</tbody></table></div>';
+  if(!entries.length) return emptyHtml('👣','No activity in this range. (Tip: the trail merges the Activity Log AND the Call Log.)');
+  return '<div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>Agent</th><th>Activity</th><th>Company / Event</th><th>Details</th><th>Source</th><th></th></tr></thead><tbody>'+
+    entries.map(en=>'<tr>'+
+      '<td class="nowrap">'+esc(en.timestamp)+'</td>'+
+      '<td><b>'+esc(en.agent)+'</b></td>'+
+      '<td><span class="pill pill-neutral">'+esc(en.type)+'</span></td>'+
+      '<td>'+esc(en.company||'—')+(en.companyId?'<br><small style="color:var(--muted)">'+esc(en.companyId)+'</small>':'')+'</td>'+
+      '<td style="max-width:280px">'+esc(en.details||'')+'</td>'+
+      '<td><span class="src-badge'+(en.source==='Call Log'?' call':'')+'">'+esc(en.source)+'</span></td>'+
+      '<td class="nowrap">'+(en.companyId?callActions(en.companyId,en.company):'')+'</td>'+
+    '</tr>').join('')+'</tbody></table></div>';
 }
-
-ACTIONS['view-edit-history']=async (el,d)=>{
-  openModal('<div class="modal-head"><h2>Company Edit History — '+esc(d.cname||d.cid)+'</h2><button class="modal-x" data-action="close-modal">×</button></div><div class="modal-body" id="edit-history-modal">'+loadingHtml('Loading edit history…')+'</div><div class="modal-foot"><button class="btn" data-action="close-modal">Close</button></div>');
-  try{
-    const data = await api('getCompanyEditHistory',{companyId:d.cid});
-    const rows = data.entries || [];
-    $('#edit-history-modal').innerHTML = rows.length ? '<div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>User</th><th>Changes</th></tr></thead><tbody>'+rows.map(en=>'<tr><td class="nowrap">'+esc(en.timestamp)+'</td><td><b>'+esc(en.user)+'</b></td><td style="max-width:380px">'+esc(en.details||'')+'</td></tr>').join('')+'</tbody></table></div>' : emptyHtml('📝','No company detail edits recorded for this company.');
-  }catch(e){ $('#edit-history-modal').innerHTML='<div class="error-box">⚠ '+esc(e.message)+'</div>'; }
-};
 
 /* ================= MANAGER: COMPANY EDIT HISTORY ====================== */
 
