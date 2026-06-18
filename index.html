@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B9 MANAGER DASHBOARD UPGRADE</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B9.1 MANAGER DASHBOARD DRILLDOWN + SIMPLIFY</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B9 MANAGER DASHBOARD UPGRADE</span>
+      <span class="build-tag" id="app-build-tag">B9.1 MANAGER DASHBOARD DRILLDOWN + SIMPLIFY</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B9 MANAGER DASHBOARD UPGRADE';
+const APP_BUILD = 'B9.1 MANAGER DASHBOARD DRILLDOWN + SIMPLIFY';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_UPDATE_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -1661,62 +1661,117 @@ async function loadCommandCenter(){
     const allCalls = (rep.lists && rep.lists.calls) ? rep.lists.calls : [];
     const resultCounts = countByResult(allCalls);
     const productiveItems = productiveBreakdownFromRows(allCalls);
-    const outcomeGroups = groupedOutcomeData(allCalls);
     const retryTotal = sumResults(resultCounts, Array.from(RETRY));
-    const closedTotal = sumResults(resultCounts, ['NO REQUIREMENT','NOT INTERESTED']);
     const invalidTotal = sumResults(resultCounts, ['WRONG NUMBER','NUMBER UNREACHABLE']);
     const leadsToFollowUpTotal = sumResults(resultCounts, ['ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED']);
-    const bidOppTotal = sumResults(resultCounts, ['BIDDING REQUIREMENT']);
+    const bidOppTotal = sumResults(resultCounts, ['BIDDING REQUIREMENT']) || (rep.kpis.bids||0);
     const companyProfileMeetings = sumResults(resultCounts, ['COMPANY PROFILE MEETING SET']);
     const projectBriefingMeetings = sumResults(resultCounts, ['PROJECT BRIEFING MEETING SET']);
-    const meetingsSetTotal = companyProfileMeetings + projectBriefingMeetings;
-    const topCards = [
-      {key:'leadsToFollowUp', label:'Leads to Follow Up', value:leadsToFollowUpTotal, sub:'Callbacks · profiles sent · events found'},
-      {key:'bids', label:'Proposal / Bid Opportunities', value:bidOppTotal || (rep.kpis.bids||0), sub:'Bidding requirements'},
-      {key:'meetings', label:'Meetings Set', value:meetingsSetTotal || (rep.kpis.meetings||0), sub:'Profile '+companyProfileMeetings+' · Briefing '+projectBriefingMeetings},
-      {key:'followupsDue', label:'Follow-Ups Due', value:rep.kpis.followupsDue||0, sub:'Due, overdue, or needs date'},
-      {key:'attention', label:'Needs Manager Attention', value:(rep.attention||[]).length, sub:'Review first'},
-      {key:'retryCases', label:'Calls to Retry', value:retryTotal, sub:'No answer / busy only'},
-      {key:'invalid', label:'Review Company Details', value:invalidTotal, sub:'Wrong / unreachable numbers'}
+    const meetingsSetTotal = companyProfileMeetings + projectBriefingMeetings || (rep.kpis.meetings||0);
+    const followupsDueTotal = rep.kpis.followupsDue || 0;
+    const attentionTotal = (rep.attention||[]).length;
+
+    const actionRequired = [
+      {key:'attention', label:'Needs Manager Attention', value:attentionTotal, sub:'Start here first', action:'dashboard'},
+      {key:'followupsDue', label:'Follow-Ups Due', value:followupsDueTotal, sub:'Due, overdue, or missing date', action:'dashboard'},
+      {key:'bids', label:'Proposal / Bid Opportunities', value:bidOppTotal, sub:'Open Bid Pipeline', action:'bids'},
+      {key:'meetingOutcome', label:'Meetings Needing Outcome', value:0, sub:'Open Meetings Booked', action:'meetingOutcome'}
     ];
+    const teamToday = [
+      {key:'calls', label:'Calls Completed', value:rep.kpis.callsLogged||allCalls.length, sub:'Open Work Trail', action:'worktrail'},
+      {key:'meaningful', label:'Productive Calls', value:rep.kpis.meaningful||sumResults(resultCounts, Array.from(MEANINGFUL)), sub:'View productive call list', action:'dashboard'},
+      {key:'meetings', label:'Meetings Set', value:meetingsSetTotal, sub:'Profile '+companyProfileMeetings+' · Briefing '+projectBriefingMeetings, action:'meetings'},
+      {key:'retryCases', label:'Calls to Retry', value:retryTotal, sub:'No answer / busy only', action:'dashboard'}
+    ];
+    const pipelineHealth = [
+      {key:'leadsToFollowUp', label:'Leads to Follow Up', value:leadsToFollowUpTotal, sub:'Callbacks · profiles sent · events found', action:'dashboard'},
+      {key:'bids', label:'Open Bid Pipeline', value:bidOppTotal, sub:'View proposal opportunities', action:'bids'},
+      {key:'meetings', label:'Meetings Booked', value:meetingsSetTotal, sub:'View scheduled meetings', action:'meetings'},
+      {key:'invalid', label:'Review Company Details', value:invalidTotal, sub:'Wrong / unreachable numbers', action:'cleanup'}
+    ];
+
     body.innerHTML =
-      '<div class="panel"><div class="section-title"><h2>Pipeline Dashboard</h2><small style="color:var(--muted);font-weight:700">Clear manager view — '+esc(rangeLabel(f))+'</small></div><p style="color:var(--muted);font-size:13px;margin-bottom:10px">Use these cards to see what needs follow-up, proposal action, meeting attention, or contact cleanup.</p></div>'+ 
-      '<div class="cards">'+topCards.map(k=>
-        '<div class="stat-card'+(state.mgrKpi===k.key?' selected':'')+'" data-action="cc-kpi" data-key="'+k.key+'">'+
-        '<div class="num">'+k.value+'</div><div class="lbl">'+k.label+'</div>'+(k.sub?'<div class="sub">'+esc(k.sub)+'</div>':'')+'</div>').join('')+'</div>'+
+      '<div class="panel"><div class="section-title"><h2>Manager Command Center</h2><small style="color:var(--muted);font-weight:700">'+esc(rangeLabel(f))+'</small></div>'+ 
+      '<p style="color:var(--muted);font-size:13px;margin-bottom:10px">This dashboard is now action-based. Click a card to open the list or working tab behind the number.</p></div>'+ 
       '<div class="dashboard-grid">'+
-        '<div class="panel"><div class="section-title"><h2>Productive Call Breakdown</h2><small style="color:var(--muted)">This explains the Productive Calls number.</small></div>'+barList(productiveItems)+'</div>'+
-        '<div class="panel"><div class="section-title"><h2>Manager Action Summary</h2></div>'+managerActionSummary(rep, productiveItems, outcomeGroups)+'</div>'+
-      '</div>'+
-      '<div class="panel"><div class="section-title"><h2>Call Outcome Breakdown</h2><small style="color:var(--muted)">Grouped the same way agents log call results.</small></div>'+groupedOutcomeHtml(outcomeGroups)+'</div>'+
-      '<div class="panel"><h2>Summary — '+esc(rangeLabel(f))+'</h2><ul class="insights">'+rep.insights.map(i=>'<li>'+esc(String(i).replace(/Meaningful conversations/gi,'Productive calls').replace(/meaningful conversations/gi,'productive calls'))+'</li>').join('')+'</ul></div>'+
-      '<div class="panel"><div class="section-title"><h2 id="cc-drill-title"></h2></div><div id="cc-drill"></div></div>'+
-      '<div class="panel"><h2>Needs Manager Attention ('+(rep.attention||[]).length+')</h2><div id="cc-attn">'+attentionList(rep.attention||[])+'</div></div>'+
-      'XXX';
+        '<div class="panel"><div class="section-title"><h2>1. What needs attention now?</h2></div><div class="cards">'+actionRequired.map(ccDashboardCard).join('')+'</div></div>'+ 
+        '<div class="panel"><div class="section-title"><h2>2. Team performance today</h2><button class="btn btn-sm" data-action="cc-open-list" data-key="performance">Open Agent Performance</button></div>'+barList(productiveItems.concat([{label:'Calls to Retry',count:retryTotal}]))+'</div>'+ 
+      '</div>'+ 
+      '<div class="panel"><div class="section-title"><h2>3. Pipeline health</h2><small style="color:var(--muted)">Click View List to open the work area.</small></div><div class="cards">'+pipelineHealth.map(ccDashboardCard).join('')+'</div></div>'+ 
+      '<div class="panel"><div class="section-title"><h2 id="cc-drill-title">List Preview</h2><button class="btn btn-sm" data-action="cc-open-list" data-key="'+esc(state.mgrKpi||'attention')+'">Open Full List</button></div><div id="cc-drill"></div></div>'+ 
+      '<div class="panel"><div class="section-title"><h2>Manager Notes</h2></div><ul class="insights">'+(rep.insights||[]).map(i=>'<li>'+esc(String(i).replace(/Meaningful conversations/gi,'Productive calls').replace(/meaningful conversations/gi,'productive calls'))+'</li>').join('')+'</ul></div>';
+    if(!state.mgrKpi) state.mgrKpi='attention';
     renderMgrDrill();
   }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
-ACTIONS['cc-kpi']=(el,d)=>{
-  state.mgrKpi=d.key;
-  document.querySelectorAll('#cc-body .stat-card').forEach(x=>x.classList.toggle('selected', x.dataset.key===d.key));
+function ccDashboardCard(k){
+  return '<div class="stat-card'+(state.mgrKpi===k.key?' selected':'')+'" data-action="cc-open-list" data-key="'+esc(k.key)+'" data-route="'+esc(k.action||'dashboard')+'">'+
+    '<div class="num">'+esc(k.value||0)+'</div><div class="lbl">'+esc(k.label)+'</div>'+
+    (k.sub?'<div class="sub">'+esc(k.sub)+'</div>':'')+
+    '<div class="sub" style="color:var(--brand);font-weight:800;margin-top:8px">View List →</div></div>';
+}
+
+ACTIONS['cc-kpi']=(el,d)=>{ ACTIONS['cc-open-list'](el,d); };
+
+ACTIONS['cc-open-list']=(el,d)=>{
+  const key = d.key || 'attention';
+  const f = state.mgrFilters || {from:todayStr(), to:todayStr(), agent:'ALL'};
+  if(key==='bids'){
+    state.bidFilters={from:f.from||'', to:f.to||'', agent:f.agent||'ALL', stage:'ALL'};
+    renderTab('bids');
+    return;
+  }
+  if(key==='meetings'){
+    state.meetingFilters={from:f.from||'', to:f.to||'', agent:f.agent||'ALL', status:'ALL'};
+    renderTab('meetings');
+    return;
+  }
+  if(key==='meetingOutcome'){
+    state.meetingFilters={from:'', to:'', agent:f.agent||'ALL', status:'NEEDS MEETING OUTCOME'};
+    renderTab('meetings');
+    return;
+  }
+  if(key==='cleanup' || key==='invalid'){
+    state.cleanupKind='invalid';
+    renderTab('cleanup');
+    setTimeout(()=>{
+      const box=$('#phone-review-box');
+      const stat=[...document.querySelectorAll('[data-action="phone-card"]')].find(x=>x.dataset.kind==='invalid');
+      if(stat) stat.click();
+      if(box) box.scrollIntoView({behavior:'smooth', block:'start'});
+    },650);
+    return;
+  }
+  if(key==='performance'){
+    state.perfFilters={from:f.from||todayStr(), to:f.to||todayStr(), agent:f.agent||'ALL'};
+    renderTab('performance');
+    return;
+  }
+  if(key==='worktrail'){
+    state.trailFilters={from:f.from||addDays(-6), to:f.to||todayStr(), agent:f.agent||'ALL', type:'calls'};
+    renderTab('worktrail');
+    return;
+  }
+  state.mgrKpi=key;
+  document.querySelectorAll('#cc-body .stat-card').forEach(x=>x.classList.toggle('selected', x.dataset.key===key));
   renderMgrDrill();
+  setTimeout(()=>{ const drill=$('#cc-drill-title'); if(drill) drill.scrollIntoView({behavior:'smooth', block:'start'}); },50);
 };
 
 function renderMgrDrill(){
   const rep=state.lastMgrReport; if(!rep) return;
   const box=$('#cc-drill'), title=$('#cc-drill-title'); if(!box) return;
   const allCalls = (rep.lists && rep.lists.calls) ? rep.lists.calls : [];
-  const key = state.mgrKpi || 'calls';
+  const key = state.mgrKpi || 'attention';
   const labelMap = {
-    calls:'Calls Logged',
+    calls:'Calls Completed',
     meaningful:'Productive Calls',
     leadsToFollowUp:'Leads to Follow Up',
     bids:'Proposal / Bid Opportunities',
     followupsDue:'Follow-Ups Due',
     meetings:'Meetings Set',
     attention:'Needs Manager Attention',
-    closed:'Closed / Not Leads',
     retryCases:'Calls to Retry',
     invalid:'Review Company Details'
   };
@@ -1729,7 +1784,6 @@ function renderMgrDrill(){
   if(key==='leadsToFollowUp') rows = allCalls.filter(c=>['ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED'].includes(String(c.result||'').toUpperCase()));
   else if(key==='bids') rows = allCalls.filter(c=>String(c.result||'').toUpperCase()==='BIDDING REQUIREMENT');
   else if(key==='meaningful') rows = allCalls.filter(c=>MEANINGFUL.has(String(c.result||'').toUpperCase()));
-  else if(key==='closed') rows = allCalls.filter(c=>['NO REQUIREMENT','NOT INTERESTED'].includes(String(c.result||'').toUpperCase()));
   else if(key==='invalid') rows = allCalls.filter(c=>['WRONG NUMBER','NUMBER UNREACHABLE'].includes(String(c.result||'').toUpperCase()));
   else if(key==='retryCases') rows = allCalls.filter(c=>RETRY.has(String(c.result||'').toUpperCase()));
   else {
