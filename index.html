@@ -220,7 +220,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B9.1 MANAGER DASHBOARD DRILLDOWN + SIMPLIFY</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B10 AGENT PERFORMANCE DASHBOARD</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -240,7 +240,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B9.1 MANAGER DASHBOARD DRILLDOWN + SIMPLIFY</span>
+      <span class="build-tag" id="app-build-tag">B10 AGENT PERFORMANCE DASHBOARD</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -294,7 +294,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B9.1 MANAGER DASHBOARD DRILLDOWN + SIMPLIFY';
+const APP_BUILD = 'B10 AGENT PERFORMANCE DASHBOARD';
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_UPDATE_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -2159,28 +2159,107 @@ ACTIONS['mtg-save']=async (el,d)=>{
 
 /* ==================== MANAGER: AGENT PERFORMANCE ====================== */
 
+function agentPerfTotals(agents){
+  return (agents||[]).reduce((t,a)=>{
+    t.calls += Number(a.calls)||0;
+    t.meaningful += Number(a.meaningful)||0;
+    t.followups += Number(a.followups)||0;
+    t.meetings += Number(a.meetings)||0;
+    t.bids += Number(a.bids)||0;
+    t.profilesSent += Number(a.profilesSent)||0;
+    t.retryCases += Number(a.retryCases)||0;
+    t.qualitySum += Number(a.qualityScore)||0;
+    return t;
+  },{calls:0,meaningful:0,followups:0,meetings:0,bids:0,profilesSent:0,retryCases:0,qualitySum:0});
+}
+function agentDisplayName(a){ return (a.name && a.name!==a.agent) ? (a.name+' ('+a.agent+')') : a.agent; }
+function agentPerfActionCards(agents){
+  const t = agentPerfTotals(agents);
+  const conv = t.calls ? Math.round((t.meaningful/t.calls)*100) : 0;
+  const avgQuality = agents.length ? Math.round(t.qualitySum / agents.length) : 0;
+  return '<div class="cards">'+
+    '<div class="stat-card" data-action="pf-open-work" data-agent="ALL" data-type="calls"><div class="num">'+t.calls+'</div><div class="lbl">Calls Logged</div><div class="sub">Click to see call trail</div></div>'+ 
+    '<div class="stat-card" data-action="pf-open-work" data-agent="ALL" data-type="calls"><div class="num">'+t.meaningful+'</div><div class="lbl">Productive Calls</div><div class="sub">Meaningful pipeline movement</div></div>'+ 
+    '<div class="stat-card" data-action="cc-open-list" data-key="meetings"><div class="num">'+t.meetings+'</div><div class="lbl">Meetings Set</div><div class="sub">Open Meetings Booked</div></div>'+ 
+    '<div class="stat-card" data-action="cc-open-list" data-key="bids"><div class="num">'+t.bids+'</div><div class="lbl">Bid Opportunities</div><div class="sub">Open Bid Pipeline</div></div>'+ 
+    '<div class="stat-card" data-action="pf-open-work" data-agent="ALL" data-type="calls"><div class="num">'+conv+'%</div><div class="lbl">Conversation Rate</div><div class="sub">Productive calls / total calls</div></div>'+ 
+    '<div class="stat-card" data-action="pf-open-work" data-agent="ALL" data-type="calls"><div class="num">'+avgQuality+'</div><div class="lbl">Avg Quality Score</div><div class="sub">Weighted pipeline quality</div></div>'+ 
+  '</div>';
+}
+function agentPerfRanking(agents, key, title, note){
+  const rows = (agents||[]).slice().sort((a,b)=>(Number(b[key])||0)-(Number(a[key])||0)).slice(0,6);
+  const max = Math.max(1, ...rows.map(a=>Number(a[key])||0));
+  return '<div class="panel"><div class="section-title"><div><h2>'+esc(title)+'</h2><div class="sub" style="color:var(--muted)">'+esc(note||'')+'</div></div></div>'+ 
+    '<div class="bar-list">'+rows.map(a=>{
+      const val=Number(a[key])||0, pct=Math.round((val/max)*100);
+      return '<div class="bar-row" data-action="pf-open-work" data-agent="'+esc(a.agent)+'" data-type="calls" style="cursor:pointer"><div class="bar-label">'+esc(agentDisplayName(a))+'</div>'+ 
+        '<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"></div></div><div class="bar-value">'+val+(key==='conversion'?'%':'')+'</div></div>';
+    }).join('')+'</div></div>';
+}
+function agentPerfTable(agents){
+  if(!agents.length) return emptyHtml('📊','No calls logged in this range.');
+  return '<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Calls</th><th>Productive</th><th>Conv %</th><th>Follow-ups</th><th>Meetings</th><th>Bids</th><th>Profiles Sent</th><th>Retry</th><th>Quality</th><th>Last Activity</th><th></th></tr></thead><tbody>'+ 
+    agents.map(a=>'<tr>'+ 
+      '<td><b>'+esc(a.agent)+'</b><br><small style="color:var(--muted)">'+esc(a.name||'')+'</small></td>'+ 
+      '<td>'+a.calls+'</td><td>'+a.meaningful+'</td><td>'+a.conversion+'%</td><td>'+a.followups+'</td>'+ 
+      '<td>'+a.meetings+'</td><td>'+a.bids+'</td><td>'+a.profilesSent+'</td><td>'+a.retryCases+'</td>'+ 
+      '<td><span class="score-bar"><i style="width:'+a.qualityScore+'%"></i></span> '+a.qualityScore+'</td>'+ 
+      '<td class="nowrap">'+esc(a.lastActivity||'—')+'</td>'+ 
+      '<td class="nowrap"><button class="btn btn-sm" data-action="pf-open-work" data-agent="'+esc(a.agent)+'" data-type="calls">View Work</button></td>'+ 
+    '</tr>').join('')+'</tbody></table></div>';
+}
+function agentPerfCoachingList(agents){
+  if(!agents.length) return '';
+  const rows = agents.slice().sort((a,b)=>(Number(b.calls)||0)-(Number(a.calls)||0));
+  return '<div class="panel"><div class="section-title"><h2>Manager coaching view</h2><span class="sub" style="color:var(--muted)">Use this to guide daily coaching, not to punish agents.</span></div>'+ 
+    '<div class="fu-grid">'+rows.map(a=>{
+      const calls=Number(a.calls)||0, meaningful=Number(a.meaningful)||0, conv=Number(a.conversion)||0;
+      let note='Keep momentum and look for next-step quality.';
+      if(calls===0) note='No call activity in this range. Check attendance, target list, or app usage.';
+      else if(calls>0 && meaningful===0) note='Many calls but no productive outcome yet. Review call opening and target quality.';
+      else if(conv<20) note='Low conversion. Coach on qualifying questions and follow-up handling.';
+      else if((Number(a.meetings)||0)+(Number(a.bids)||0)>0) note='Strong output. Review next steps so opportunities do not stall.';
+      return '<div class="fu-card"><div class="co">'+esc(agentDisplayName(a))+'</div>'+ 
+        '<div class="meta">Calls: <b>'+calls+'</b> · Productive: <b>'+meaningful+'</b> · Conv: <b>'+conv+'%</b></div>'+ 
+        '<div class="notes">'+esc(note)+'</div>'+ 
+        '<div class="fu-actions"><button class="btn btn-sm" data-action="pf-open-work" data-agent="'+esc(a.agent)+'" data-type="calls">View Work Trail</button></div></div>';
+    }).join('')+'</div></div>';
+}
+
 async function renderPerformance(c){
   await ensureUsers();
   if(!state.perfFilters) state.perfFilters={from:monthStart(), to:todayStr(), agent:'ALL'};
   const f=state.perfFilters;
-  c.innerHTML='<div class="panel">'+dateAgentBar(f,'pf','pf-apply')+'</div><div id="pf-body">'+loadingHtml('Loading performance…')+'</div>';
+  c.innerHTML='<div class="panel"><div class="section-title"><div><h2>Agent Performance Dashboard</h2><div style="color:var(--muted);font-size:12.5px">B10 view: clearer agent comparison, coaching signals, and click-through to work trail.</div></div></div>'+dateAgentBar(f,'pf','pf-apply')+'</div><div id="pf-body">'+loadingHtml('Loading performance…')+'</div>';
   try{
     const data = await api('getAgentPerformanceReport',{fromDate:f.from,toDate:f.to,agent:f.agent});
-    $('#pf-body').innerHTML='<div class="panel"><h2>Agent Performance</h2>'+
-      (data.agents.length ?
-      '<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Calls</th><th>Productive</th><th>Conv %</th><th>Follow-ups Created</th><th>Meetings</th><th>Bids</th><th>Profiles Sent</th><th>Retry Cases</th><th>Quality Score</th><th>Last Activity</th></tr></thead><tbody>'+
-      data.agents.map(a=>'<tr>'+
-        '<td><b>'+esc(a.agent)+'</b><br><small style="color:var(--muted)">'+esc(a.name||'')+'</small></td>'+
-        '<td>'+a.calls+'</td><td>'+a.meaningful+'</td><td>'+a.conversion+'%</td><td>'+a.followups+'</td>'+
-        '<td>'+a.meetings+'</td><td>'+a.bids+'</td><td>'+a.profilesSent+'</td><td>'+a.retryCases+'</td>'+
-        '<td><span class="score-bar"><i style="width:'+a.qualityScore+'%"></i></span> '+a.qualityScore+'</td>'+
-        '<td class="nowrap">'+esc(a.lastActivity||'—')+'</td></tr>').join('')+'</tbody></table></div>'
-      : emptyHtml('📊','No calls logged in this range.'))+'</div>';
+    const agents = data.agents || [];
+    $('#pf-body').innerHTML =
+      '<div class="panel"><div class="section-title"><div><h2>Performance Summary</h2><div style="color:var(--muted);font-size:12.5px">Click any card or agent row to open the related working list.</div></div></div>'+agentPerfActionCards(agents)+'</div>'+ 
+      '<div class="dashboard-grid">'+
+        agentPerfRanking(agents,'calls','Call volume by agent','Who is doing the calling work.')+
+        agentPerfRanking(agents,'meaningful','Productive calls by agent','Calls that created follow-up, bids, meetings, profiles sent, or identified events.')+
+      '</div>'+ 
+      '<div class="dashboard-grid">'+
+        agentPerfRanking(agents,'conversion','Conversation rate by agent','Productive calls divided by total calls.')+
+        agentPerfRanking(agents,'qualityScore','Quality score by agent','Weighted score from conversion plus pipeline output.')+
+      '</div>'+ 
+      agentPerfCoachingList(agents)+
+      '<div class="panel"><div class="section-title"><h2>Agent Performance Details</h2><button class="btn btn-sm" data-action="pf-open-work" data-agent="'+esc(f.agent||'ALL')+'" data-type="calls">Open Work Trail</button></div>'+agentPerfTable(agents)+'</div>';
   }catch(e){ $('#pf-body').innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
 ACTIONS['pf-apply']=()=>{ readBar('pf', state.perfFilters); renderPerformance($('#tab-content')); };
 ACTIONS['pf-apply-quick']=(el,d)=>{ quickRange(state.perfFilters,d.q); renderPerformance($('#tab-content')); };
+ACTIONS['pf-open-work']=(el,d)=>{
+  if(!state.trailFilters) state.trailFilters={from:addDays(-6),to:todayStr(),agent:'ALL',type:'all'};
+  state.trailFilters.from = state.perfFilters ? state.perfFilters.from : monthStart();
+  state.trailFilters.to = state.perfFilters ? state.perfFilters.to : todayStr();
+  state.trailFilters.agent = (d.agent && d.agent!=='') ? d.agent : 'ALL';
+  state.trailFilters.type = d.type || 'calls';
+  state.trailFilters.locked = false;
+  renderTab('trail');
+};
 
 /* ======================== MANAGER: WORK TRAIL ========================= */
 
