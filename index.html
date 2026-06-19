@@ -264,7 +264,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.1 AUDIT SAFETY PATCH</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.2 WORKFLOW + FILTER PATCH</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -284,7 +284,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17.1 AUDIT SAFETY PATCH</span>
+      <span class="build-tag" id="app-build-tag">B17.2 WORKFLOW + FILTER PATCH</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -339,7 +339,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17.1 AUDIT SAFETY PATCH';
+const APP_BUILD = 'B17.2 WORKFLOW + FILTER PATCH';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -2183,10 +2183,11 @@ async function renderMeetingPipeline(c){
       '<div class="field"><label>To Date</label><input type="date" id="mtg-to" value="'+esc(f.to)+'"></div>'+
       '<div class="field"><label>Agent</label>'+(state.user.role==='MANAGER'?'<select id="mtg-agent">'+agentOptions(f.agent)+'</select>':'<input id="mtg-agent" value="'+esc(state.user.code)+'" disabled>')+'</div>'+
       '<div class="field"><label>Status</label><select id="mtg-status">'+meetingFilterStatusOptions(f.status,true)+'</select></div>'+
-      '<button class="btn btn-primary" data-action="mtg-apply">Apply / Refresh</button>'+
+      '<button class="btn btn-primary" data-action="mtg-apply">Apply Filters</button>'+
+      '<button class="btn" data-action="mtg-refresh">Refresh List</button>'+
       '<button class="btn" data-action="mtg-clear">Clear Filters</button>'+
-      '<button class="btn" data-action="mtg-import">Import Meeting Calls</button>'+
-    '</div></div><div class="panel"><h2>Meetings Booked</h2><p style="color:var(--muted);font-size:13px">Meeting calls are tracked separately from ordinary follow-ups. Use this area to mark outcomes after meetings. Past scheduled meetings automatically appear under Needs Meeting Outcome until the agent marks Done, Rescheduled, Cancelled, or No Show.</p></div><div id="mtg-body">'+loadingHtml('Loading meetings…')+'</div>';
+      (state.user.role==='MANAGER' ? '<button class="btn" data-action="mtg-import">Admin: Import Old Meeting Calls</button>' : '')+
+    '</div></div><div class="panel"><h2>Meetings Booked</h2><p style="color:var(--muted);font-size:13px">Meeting calls are tracked separately from ordinary follow-ups. Use this area to mark outcomes after meetings. Past scheduled meetings automatically appear under Needs Meeting Outcome until the agent marks Done, Rescheduled, Cancelled, or No Show.</p></div><div id="mtg-body">'+loadingHtml('Loading meeting list with your filters…')+'</div>';
   const st=$('#mtg-status');
   if(st){ st.addEventListener('change',()=>{ state.meetingFilters.status = st.value || 'ALL'; loadMeetingPipeline(); }); }
   await loadMeetingPipeline();
@@ -2204,7 +2205,7 @@ async function loadMeetingPipeline(){
     const params={fromDate:f.from,toDate:f.to,agent:f.agent,status:f.status};
     if(params.agent==='ALL') params.agent='';
     if(params.status==='ALL') params.status='';
-    const summary=await api('getMeetingSummary',{});
+    const summary=await api('getMeetingSummary',params);
     const data=await api('getMeetingPipeline',params);
     const byStatus=summary.byStatus || {};
     const selectedStatus=f.status && f.status!=='ALL' ? f.status : 'ALL';
@@ -2241,17 +2242,28 @@ function meetingTable(meetings, selectedStatus){
 }
 
 function clearMeetingFilters(status){ state.meetingFilters={from:'',to:'',agent:'ALL',status:status||'ALL'}; }
-ACTIONS['mtg-apply']=()=>{ const f=state.meetingFilters; f.from=$('#mtg-from').value; f.to=$('#mtg-to').value; f.agent=$('#mtg-agent').value; f.status=$('#mtg-status').value; loadMeetingPipeline(); };
+function readMeetingFilterControls(){
+  const f=state.meetingFilters || (state.meetingFilters={from:'',to:'',agent:'ALL',status:'ALL'});
+  const from=$('#mtg-from'), to=$('#mtg-to'), agent=$('#mtg-agent'), status=$('#mtg-status');
+  if(from) f.from=from.value || '';
+  if(to) f.to=to.value || '';
+  if(agent) f.agent=agent.value || f.agent || 'ALL';
+  if(status) f.status=status.value || 'ALL';
+  return f;
+}
+ACTIONS['mtg-apply']=()=>{ readMeetingFilterControls(); loadMeetingPipeline(); };
+ACTIONS['mtg-refresh']=()=>{ readMeetingFilterControls(); loadMeetingPipeline(); };
 ACTIONS['mtg-clear']=()=>{ clearMeetingFilters('ALL'); renderMeetingPipeline($('#tab-content')); };
 ACTIONS['mtg-quick']=(el,d)=>{ quickRange(state.meetingFilters,d.q); renderMeetingPipeline($('#tab-content')); };
-ACTIONS['mtg-filter-status']=(el,d)=>{ clearMeetingFilters(d.status||'ALL'); renderMeetingPipeline($('#tab-content')); };
-ACTIONS['mtg-filter-all']=()=>{ clearMeetingFilters('ALL'); renderMeetingPipeline($('#tab-content')); };
+ACTIONS['mtg-filter-status']=(el,d)=>{ const f=readMeetingFilterControls(); f.status=d.status||'ALL'; const st=$('#mtg-status'); if(st) st.value=f.status; loadMeetingPipeline(); };
+ACTIONS['mtg-filter-all']=()=>{ const f=readMeetingFilterControls(); f.status='ALL'; const st=$('#mtg-status'); if(st) st.value='ALL'; loadMeetingPipeline(); };
 ACTIONS['mtg-import']=async (el)=>{
-  if(!confirm('Import previous meeting-set call logs into Meetings Booked? Existing meeting records will not be duplicated.')) return;
+  if(!(state.user && state.user.role==='MANAGER')){ toast('Only managers can import old meeting calls.','error'); return; }
+  if(!confirm('Admin tool only: import old meeting-set call logs into Meetings Booked? Existing meeting records will not be duplicated.')) return;
   el.disabled=true; el.textContent='Importing…';
-  try{ const res=await api('importMeetingCalls',{}); toast('Imported '+(res.created||0)+' meeting(s). Existing skipped: '+(res.skippedExisting||0)+'. Showing SCHEDULED now.','success'); clearMeetingFilters('SCHEDULED'); await renderMeetingPipeline($('#tab-content')); }
+  try{ const res=await api('importMeetingCalls',{}); toast('Imported '+(res.created||0)+' old meeting(s). Existing skipped: '+(res.skippedExisting||0)+'.','success'); state.meetingFilters.status='SCHEDULED'; await renderMeetingPipeline($('#tab-content')); }
   catch(e){ toast(e.message,'error'); }
-  finally{ el.disabled=false; el.textContent='Import Meeting Calls'; }
+  finally{ el.disabled=false; el.textContent='Admin: Import Old Meeting Calls'; }
 };
 
 ACTIONS['mtg-update-modal']=(el,d)=>{
