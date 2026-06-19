@@ -264,7 +264,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.3 MEETINGS FILTER CLICK FIX</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.4 MEETINGS BOOKED STABLE FILTER REBUILD</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -284,7 +284,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17.3 MEETINGS FILTER CLICK FIX</span>
+      <span class="build-tag" id="app-build-tag">B17.4 MEETINGS BOOKED STABLE FILTER REBUILD</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -339,7 +339,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17.3 MEETINGS FILTER CLICK FIX';
+const APP_BUILD = 'B17.4 MEETINGS BOOKED STABLE FILTER REBUILD';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -2179,29 +2179,34 @@ async function renderMeetingPipeline(c){
   await ensureUsers();
   if(!state.meetingFilters) state.meetingFilters={from:'', to:'', agent:'ALL', status:'ALL'};
   const f=state.meetingFilters;
-  c.innerHTML='<div class="panel"><div class="quick-ranges">'+
-      '<button class="chip" data-action="mtg-quick" data-q="today">Today</button>'+
-      '<button class="chip" data-action="mtg-quick" data-q="7">Last 7 Days</button>'+
-      '<button class="chip" data-action="mtg-quick" data-q="30">Last 30 Days</button>'+
-      '<button class="chip" data-action="mtg-quick" data-q="month">This Month</button>'+
-      '<button class="chip" data-action="mtg-quick" data-q="all">All</button>'+
-    '</div><div class="filter-bar">'+
+  c.innerHTML='<div class="panel" id="mtg-filter-panel"><div class="quick-ranges">'+
+      '<button class="chip" type="button" data-action="mtg-quick" data-q="today">Today</button>'+
+      '<button class="chip" type="button" data-action="mtg-quick" data-q="7">Last 7 Days</button>'+
+      '<button class="chip" type="button" data-action="mtg-quick" data-q="30">Last 30 Days</button>'+
+      '<button class="chip" type="button" data-action="mtg-quick" data-q="month">This Month</button>'+
+      '<button class="chip" type="button" data-action="mtg-quick" data-q="all">All</button>'+
+    '</div><form id="mtg-filter-form" class="filter-bar">'+
       '<div class="field"><label>From Date</label><input type="date" id="mtg-from" value="'+esc(f.from)+'"></div>'+
       '<div class="field"><label>To Date</label><input type="date" id="mtg-to" value="'+esc(f.to)+'"></div>'+
       '<div class="field"><label>Agent</label>'+(state.user.role==='MANAGER'?'<select id="mtg-agent">'+agentOptions(f.agent)+'</select>':'<input id="mtg-agent" value="'+esc(state.user.code)+'" disabled>')+'</div>'+
       '<div class="field"><label>Status</label><select id="mtg-status">'+meetingFilterStatusOptions(f.status,true)+'</select></div>'+
-      '<button class="btn btn-primary" id="mtg-apply-btn" data-action="mtg-apply">Apply Filters</button>'+
-      '<button class="btn" id="mtg-clear-btn" data-action="mtg-clear">Clear Filters</button>'+
-      (state.user.role==='MANAGER'?'<button class="btn" data-action="mtg-import">Admin: Import Old Meeting Calls</button>':'')+
-    '</div></div><div class="panel"><h2>Meetings Booked</h2><p style="color:var(--muted);font-size:13px">Meeting calls are tracked separately from ordinary follow-ups. Use this area to mark outcomes after meetings. Past scheduled meetings automatically appear under Needs Meeting Outcome until the agent marks Done, Rescheduled, Cancelled, or No Show.</p></div><div id="mtg-body">'+loadingHtml('Loading meetings…')+'</div>';
-  const st=$('#mtg-status');
-  if(st){ st.addEventListener('change',()=>{ state.meetingFilters.status = st.value || 'ALL'; }); }
+      '<button class="btn btn-primary" type="submit" id="mtg-apply-btn">Apply Filters</button>'+
+      '<button class="btn" type="button" id="mtg-refresh-btn">Refresh List</button>'+
+      '<button class="btn" type="button" id="mtg-clear-btn">Clear Filters</button>'+
+      (state.user.role==='MANAGER'?'<button class="btn" type="button" data-action="mtg-import">Admin: Import Old Meeting Calls</button>':'')+
+    '</form></div><div class="panel"><h2>Meetings Booked</h2><p style="color:var(--muted);font-size:13px">Meeting calls are tracked separately from ordinary follow-ups. Filters only control what you see below; they never change the stored meeting date. Past scheduled meetings automatically appear under Needs Meeting Outcome until the agent marks Done, Rescheduled, Cancelled, or No Show.</p></div><div id="mtg-body">'+loadingHtml('Loading meeting list…')+'</div>';
+
+  const form=$('#mtg-filter-form');
+  if(form){ form.addEventListener('submit', async ev=>{ ev.preventDefault(); await applyMeetingFilters(true); }); }
   const ap=$('#mtg-apply-btn');
   if(ap){ ap.addEventListener('click', async ev=>{ ev.preventDefault(); ev.stopPropagation(); await applyMeetingFilters(true); }); }
   const rf=$('#mtg-refresh-btn');
   if(rf){ rf.addEventListener('click', async ev=>{ ev.preventDefault(); ev.stopPropagation(); await applyMeetingFilters(true); }); }
   const cl=$('#mtg-clear-btn');
-  if(cl){ cl.addEventListener('click', async ev=>{ ev.preventDefault(); ev.stopPropagation(); clearMeetingFilters('ALL'); await renderMeetingPipeline($('#tab-content')); }); }
+  if(cl){ cl.addEventListener('click', async ev=>{ ev.preventDefault(); ev.stopPropagation(); clearMeetingFilters('ALL'); await renderMeetingPipeline($('#tab-content')); scrollToMeetingList(); }); }
+  const st=$('#mtg-status');
+  if(st){ st.addEventListener('change', async ()=>{ state.meetingFilters.status = st.value || 'ALL'; await applyMeetingFilters(true); }); }
+  window.applyMeetingFiltersFromButton = async function(ev){ if(ev){ ev.preventDefault(); ev.stopPropagation(); } await applyMeetingFilters(true); return false; };
   await loadMeetingPipeline(false);
 }
 
@@ -2216,7 +2221,7 @@ function syncMeetingFilterState(){
 }
 function scrollToMeetingList(){
   const el=$('#mtg-list-panel') || $('#mtg-body');
-  if(el) setTimeout(()=>el.scrollIntoView({behavior:'smooth', block:'start'}),80);
+  if(el) setTimeout(()=>el.scrollIntoView({behavior:'smooth', block:'start'}),60);
 }
 async function applyMeetingFilters(shouldScroll){
   syncMeetingFilterState();
@@ -2226,6 +2231,7 @@ async function applyMeetingFilters(shouldScroll){
 async function loadMeetingPipeline(shouldScroll){
   const f=syncMeetingFilterState();
   const body=$('#mtg-body'); if(!body) return;
+  body.innerHTML='<div class="panel">'+loadingHtml('Applying meeting filters…')+'</div>';
   try{
     const params={fromDate:f.from,toDate:f.to,agent:f.agent,status:f.status};
     if(params.agent==='ALL') params.agent='';
@@ -2236,34 +2242,38 @@ async function loadMeetingPipeline(shouldScroll){
     const data=await api('getMeetingPipeline',params);
     const byStatus=summary.byStatus || {};
     const selectedStatus=f.status && f.status!=='ALL' ? f.status : 'ALL';
-    const selectedLabel=(selectedStatus==='ALL'?'Showing all meetings':'Filtered to: '+selectedStatus)+' · Dates: '+((f.from||f.to)?((f.from||'Start')+' to '+(f.to||'Today')):'All')+' · Agent: '+((f.agent&&f.agent!=='ALL')?f.agent:(state.user.role==='MANAGER'?'All agents':state.user.code));
-    const title='Meetings Booked — '+(selectedStatus==='ALL'?'ALL STATUSES':selectedStatus)+' ('+data.count+')';
+    const dateText=(f.from||f.to)?((f.from||'Start')+' to '+(f.to||'Today')):'All';
+    const agentText=(f.agent&&f.agent!=='ALL')?f.agent:(state.user.role==='MANAGER'?'All agents':state.user.code);
+    const selectedLabel=(selectedStatus==='ALL'?'Showing all meetings':'Filtered to: '+selectedStatus)+' · Dates: '+dateText+' · Agent: '+agentText;
+    const title='Meeting List — '+(selectedStatus==='ALL'?'ALL STATUSES':selectedStatus)+' ('+data.count+')';
+
     body.innerHTML=
-      '<div class="panel" style="padding:10px 14px;color:var(--muted);font-weight:700">'+esc(selectedLabel)+'</div>'+
+      '<div class="panel" style="padding:10px 14px;color:var(--muted);font-weight:700">'+esc(selectedLabel)+'</div>'+ 
+      '<div class="panel" id="mtg-list-panel"><div class="section-title"><h2>'+esc(title)+'</h2><button class="btn btn-sm" data-action="mtg-refresh">Refresh List</button></div>'+meetingTable(data.meetings||[], selectedStatus)+'</div>'+ 
       '<div class="cards">'+
-        '<div class="stat-card" data-action="mtg-filter-all"><div class="num">'+summary.total+'</div><div class="lbl">Total Meetings<br><span style="color:var(--brand);font-weight:800">Click to review</span></div></div>'+
-        '<div class="stat-card" data-action="mtg-filter-status" data-status="SCHEDULED"><div class="num">'+(byStatus.SCHEDULED||0)+'</div><div class="lbl">Scheduled<br><span style="color:var(--brand);font-weight:800">Click scheduled</span></div></div>'+
-        '<div class="stat-card" data-action="mtg-filter-status" data-status="NEEDS MEETING OUTCOME"><div class="num">'+(byStatus['NEEDS MEETING OUTCOME']||0)+'</div><div class="lbl">Needs Meeting Outcome<br><span style="color:var(--brand);font-weight:800">Click to update</span></div></div>'+
-        '<div class="stat-card" data-action="mtg-filter-status" data-status="DONE"><div class="num">'+(byStatus.DONE||0)+'</div><div class="lbl">Done<br><span style="color:var(--brand);font-weight:800">Click done</span></div></div>'+
-      '</div>'+
-      '<div class="panel"><h2>Meeting Status Summary</h2><p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Click a status to filter the meeting list below.</p><div class="stats-grid">'+MEETING_FILTER_STATUSES.map(s=>'<div class="stat" style="cursor:pointer;'+(selectedStatus===s?'border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft) inset;':'')+'" data-action="mtg-filter-status" data-status="'+esc(s)+'"><b>'+(byStatus[s]||0)+'</b><span>'+esc(s)+'</span><br><small style="color:var(--brand);font-weight:800">Click to review</small></div>').join('')+'</div></div>'+
-      '<div class="panel" id="mtg-list-panel"><div class="section-title"><h2>'+esc(title)+'</h2><button class="btn btn-sm" data-action="mtg-refresh">Refresh List</button></div>'+meetingTable(data.meetings||[], selectedStatus)+'</div>';
+        '<div class="stat-card" data-action="mtg-filter-all"><div class="num">'+summary.total+'</div><div class="lbl">Total Meetings</div><div class="sub">Show all in this date/agent range</div></div>'+ 
+        '<div class="stat-card" data-action="mtg-filter-status" data-status="SCHEDULED"><div class="num">'+(byStatus.SCHEDULED||0)+'</div><div class="lbl">Scheduled</div><div class="sub">Show scheduled</div></div>'+ 
+        '<div class="stat-card" data-action="mtg-filter-status" data-status="NEEDS MEETING OUTCOME"><div class="num">'+(byStatus['NEEDS MEETING OUTCOME']||0)+'</div><div class="lbl">Needs Meeting Outcome</div><div class="sub">Show meetings to update</div></div>'+ 
+        '<div class="stat-card" data-action="mtg-filter-status" data-status="DONE"><div class="num">'+(byStatus.DONE||0)+'</div><div class="lbl">Done</div><div class="sub">Show done</div></div>'+ 
+      '</div>'+ 
+      '<div class="panel"><h2>Meeting Status Summary</h2><p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">These counts use the selected date and agent filters. Click a status to update the list above.</p><div class="stats-grid">'+MEETING_FILTER_STATUSES.map(s=>'<div class="stat" style="cursor:pointer;'+(selectedStatus===s?'border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft) inset;':'')+'" data-action="mtg-filter-status" data-status="'+esc(s)+'"><b>'+(byStatus[s]||0)+'</b><span>'+esc(s)+'</span></div>').join('')+'</div></div>';
+    const statusEl=$('#mtg-status'); if(statusEl) statusEl.value=selectedStatus;
     if(shouldScroll) scrollToMeetingList();
-  }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
+  }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message || 'Meetings could not load. Please refresh and try again.')+'</div>'; }
 }
 
 function meetingTable(meetings, selectedStatus){
   if(!meetings.length){
     const s=String(selectedStatus||'ALL').toUpperCase();
-    const msg = s==='ALL' ? 'No meetings booked yet.' : (s==='NEEDS MEETING OUTCOME' ? 'No meetings need outcome yet.' : 'No '+s.toLowerCase()+' meetings yet.');
+    const msg = s==='ALL' ? 'No meetings match these filters.' : (s==='NEEDS MEETING OUTCOME' ? 'No meetings need outcome for these filters.' : 'No '+s.toLowerCase()+' meetings match these filters.');
     return emptyHtml('🗓️', msg);
   }
   return '<div class="table-wrap"><table><thead><tr><th>Meeting</th><th>Company</th><th>Agent</th><th>Status</th><th>Meeting Date</th><th>Prep / Notes</th><th>Next Action</th><th></th></tr></thead><tbody>'+meetings.map(m=>
-    '<tr><td><b>'+esc(m.meetingType||'Meeting')+'</b><br><small style="color:var(--muted)">'+esc(m.meetingId)+'</small></td>'+
-    '<td><b>'+esc(m.companyName||'')+'</b><br><small style="color:var(--muted)">'+esc(m.companyId||'')+'</small></td>'+
-    '<td>'+esc(m.agent||'—')+'</td><td>'+meetingStatusPill(meetingDisplayStatus(m))+'</td><td class="nowrap">'+esc(m.meetingDate||'—')+'</td>'+
-    '<td><small><b>Prep:</b> '+esc(m.prepNotes||'—')+'<br><b>Result:</b> '+esc(m.meetingNotes||'—')+'</small></td>'+
-    '<td><small>'+esc(m.nextResult||'—')+(m.nextActionDate?'<br>'+esc(m.nextActionDate):'')+'</small></td>'+
+    '<tr><td><b>'+esc(m.meetingType||'Meeting')+'</b><br><small style="color:var(--muted)">'+esc(m.meetingId)+'</small></td>'+ 
+    '<td><b>'+esc(m.companyName||'')+'</b><br><small style="color:var(--muted)">'+esc(m.companyId||'')+'</small></td>'+ 
+    '<td>'+esc(m.agent||'—')+'</td><td>'+meetingStatusPill(meetingDisplayStatus(m))+'</td><td class="nowrap">'+esc(m.meetingDate||'—')+'</td>'+ 
+    '<td><small><b>Prep:</b> '+esc(m.prepNotes||'—')+'<br><b>Result:</b> '+esc(m.meetingNotes||'—')+'</small></td>'+ 
+    '<td><small>'+esc(m.nextResult||'—')+(m.nextActionDate?'<br>'+esc(m.nextActionDate):'')+'</small></td>'+ 
     '<td class="nowrap"><button class="btn btn-sm btn-primary" data-action="mtg-update-modal" data-meeting="'+esc(m.meetingId)+'" data-company="'+esc(m.companyName)+'" data-status="'+esc(meetingDisplayStatus(m))+'" data-date="'+esc(m.meetingDate)+'">Update</button> '+
     '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(m.companyId)+'" data-cname="'+esc(m.companyName)+'">History</button></td></tr>'
   ).join('')+'</tbody></table></div>';
@@ -2271,7 +2281,7 @@ function meetingTable(meetings, selectedStatus){
 
 function clearMeetingFilters(status){ state.meetingFilters={from:'',to:'',agent:'ALL',status:status||'ALL'}; }
 ACTIONS['mtg-apply']=async ()=>{ await applyMeetingFilters(true); };
-ACTIONS['mtg-clear']=async ()=>{ clearMeetingFilters('ALL'); await renderMeetingPipeline($('#tab-content')); };
+ACTIONS['mtg-clear']=async ()=>{ clearMeetingFilters('ALL'); await renderMeetingPipeline($('#tab-content')); scrollToMeetingList(); };
 ACTIONS['mtg-quick']=async (el,d)=>{ quickRange(state.meetingFilters,d.q); await renderMeetingPipeline($('#tab-content')); scrollToMeetingList(); };
 ACTIONS['mtg-filter-status']=async (el,d)=>{ const f=syncMeetingFilterState(); f.status=d.status||'ALL'; const st=$('#mtg-status'); if(st) st.value=f.status; await loadMeetingPipeline(true); };
 ACTIONS['mtg-filter-all']=async ()=>{ const f=syncMeetingFilterState(); f.status='ALL'; const st=$('#mtg-status'); if(st) st.value='ALL'; await loadMeetingPipeline(true); };
