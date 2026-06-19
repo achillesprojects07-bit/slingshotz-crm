@@ -264,7 +264,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.2 WORKFLOW + FILTER PATCH</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.3 MEETINGS FILTER CLICK FIX</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -284,7 +284,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17.2 WORKFLOW + FILTER PATCH</span>
+      <span class="build-tag" id="app-build-tag">B17.3 MEETINGS FILTER CLICK FIX</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -339,7 +339,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17.2 WORKFLOW + FILTER PATCH';
+const APP_BUILD = 'B17.3 MEETINGS FILTER CLICK FIX';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -531,7 +531,14 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const fn = ACTIONS[el.dataset.action];
-  if (fn) { e.preventDefault(); fn(el, el.dataset); }
+  if (fn) {
+    e.preventDefault();
+    try { await fn(el, el.dataset); }
+    catch(err){
+      console.error('Action failed:', el.dataset.action, err);
+      toast((err && err.message) ? err.message : 'This button could not complete. Please refresh and try again.', 'error');
+    }
+  }
 });
 
 ACTIONS['reload-tab'] = () => renderTab(state.tab);
@@ -2183,29 +2190,49 @@ async function renderMeetingPipeline(c){
       '<div class="field"><label>To Date</label><input type="date" id="mtg-to" value="'+esc(f.to)+'"></div>'+
       '<div class="field"><label>Agent</label>'+(state.user.role==='MANAGER'?'<select id="mtg-agent">'+agentOptions(f.agent)+'</select>':'<input id="mtg-agent" value="'+esc(state.user.code)+'" disabled>')+'</div>'+
       '<div class="field"><label>Status</label><select id="mtg-status">'+meetingFilterStatusOptions(f.status,true)+'</select></div>'+
-      '<button class="btn btn-primary" data-action="mtg-apply">Apply Filters</button>'+
-      '<button class="btn" data-action="mtg-refresh">Refresh List</button>'+
-      '<button class="btn" data-action="mtg-clear">Clear Filters</button>'+
-      (state.user.role==='MANAGER' ? '<button class="btn" data-action="mtg-import">Admin: Import Old Meeting Calls</button>' : '')+
-    '</div></div><div class="panel"><h2>Meetings Booked</h2><p style="color:var(--muted);font-size:13px">Meeting calls are tracked separately from ordinary follow-ups. Use this area to mark outcomes after meetings. Past scheduled meetings automatically appear under Needs Meeting Outcome until the agent marks Done, Rescheduled, Cancelled, or No Show.</p></div><div id="mtg-body">'+loadingHtml('Loading meeting list with your filters…')+'</div>';
+      '<button class="btn btn-primary" id="mtg-apply-btn" data-action="mtg-apply">Apply Filters</button>'+
+      '<button class="btn" id="mtg-clear-btn" data-action="mtg-clear">Clear Filters</button>'+
+      (state.user.role==='MANAGER'?'<button class="btn" data-action="mtg-import">Admin: Import Old Meeting Calls</button>':'')+
+    '</div></div><div class="panel"><h2>Meetings Booked</h2><p style="color:var(--muted);font-size:13px">Meeting calls are tracked separately from ordinary follow-ups. Use this area to mark outcomes after meetings. Past scheduled meetings automatically appear under Needs Meeting Outcome until the agent marks Done, Rescheduled, Cancelled, or No Show.</p></div><div id="mtg-body">'+loadingHtml('Loading meetings…')+'</div>';
   const st=$('#mtg-status');
-  if(st){ st.addEventListener('change',()=>{ state.meetingFilters.status = st.value || 'ALL'; loadMeetingPipeline(); }); }
-  await loadMeetingPipeline();
+  if(st){ st.addEventListener('change',()=>{ state.meetingFilters.status = st.value || 'ALL'; }); }
+  const ap=$('#mtg-apply-btn');
+  if(ap){ ap.addEventListener('click', async ev=>{ ev.preventDefault(); ev.stopPropagation(); await applyMeetingFilters(true); }); }
+  const rf=$('#mtg-refresh-btn');
+  if(rf){ rf.addEventListener('click', async ev=>{ ev.preventDefault(); ev.stopPropagation(); await applyMeetingFilters(true); }); }
+  const cl=$('#mtg-clear-btn');
+  if(cl){ cl.addEventListener('click', async ev=>{ ev.preventDefault(); ev.stopPropagation(); clearMeetingFilters('ALL'); await renderMeetingPipeline($('#tab-content')); }); }
+  await loadMeetingPipeline(false);
 }
 
-async function loadMeetingPipeline(){
-  const f=state.meetingFilters;
+function syncMeetingFilterState(){
+  const f=state.meetingFilters || (state.meetingFilters={from:'',to:'',agent:'ALL',status:'ALL'});
+  const statusEl=$('#mtg-status'), agentEl=$('#mtg-agent'), fromEl=$('#mtg-from'), toEl=$('#mtg-to');
+  if(statusEl) f.status=statusEl.value || 'ALL';
+  if(agentEl) f.agent=agentEl.value || f.agent || 'ALL';
+  if(fromEl) f.from=fromEl.value || '';
+  if(toEl) f.to=toEl.value || '';
+  return f;
+}
+function scrollToMeetingList(){
+  const el=$('#mtg-list-panel') || $('#mtg-body');
+  if(el) setTimeout(()=>el.scrollIntoView({behavior:'smooth', block:'start'}),80);
+}
+async function applyMeetingFilters(shouldScroll){
+  syncMeetingFilterState();
+  await loadMeetingPipeline(!!shouldScroll);
+}
+
+async function loadMeetingPipeline(shouldScroll){
+  const f=syncMeetingFilterState();
   const body=$('#mtg-body'); if(!body) return;
   try{
-    const statusEl=$('#mtg-status'), agentEl=$('#mtg-agent'), fromEl=$('#mtg-from'), toEl=$('#mtg-to');
-    if(statusEl) f.status=statusEl.value || 'ALL';
-    if(agentEl) f.agent=agentEl.value || f.agent || 'ALL';
-    if(fromEl) f.from=fromEl.value || '';
-    if(toEl) f.to=toEl.value || '';
     const params={fromDate:f.from,toDate:f.to,agent:f.agent,status:f.status};
     if(params.agent==='ALL') params.agent='';
     if(params.status==='ALL') params.status='';
-    const summary=await api('getMeetingSummary',params);
+    const summaryParams={fromDate:f.from,toDate:f.to,agent:f.agent};
+    if(summaryParams.agent==='ALL') summaryParams.agent='';
+    const summary=await api('getMeetingSummary',summaryParams);
     const data=await api('getMeetingPipeline',params);
     const byStatus=summary.byStatus || {};
     const selectedStatus=f.status && f.status!=='ALL' ? f.status : 'ALL';
@@ -2220,7 +2247,8 @@ async function loadMeetingPipeline(){
         '<div class="stat-card" data-action="mtg-filter-status" data-status="DONE"><div class="num">'+(byStatus.DONE||0)+'</div><div class="lbl">Done<br><span style="color:var(--brand);font-weight:800">Click done</span></div></div>'+
       '</div>'+
       '<div class="panel"><h2>Meeting Status Summary</h2><p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Click a status to filter the meeting list below.</p><div class="stats-grid">'+MEETING_FILTER_STATUSES.map(s=>'<div class="stat" style="cursor:pointer;'+(selectedStatus===s?'border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft) inset;':'')+'" data-action="mtg-filter-status" data-status="'+esc(s)+'"><b>'+(byStatus[s]||0)+'</b><span>'+esc(s)+'</span><br><small style="color:var(--brand);font-weight:800">Click to review</small></div>').join('')+'</div></div>'+
-      '<div class="panel"><div class="section-title"><h2>'+esc(title)+'</h2><button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+meetingTable(data.meetings||[], selectedStatus)+'</div>';
+      '<div class="panel" id="mtg-list-panel"><div class="section-title"><h2>'+esc(title)+'</h2><button class="btn btn-sm" data-action="mtg-refresh">Refresh List</button></div>'+meetingTable(data.meetings||[], selectedStatus)+'</div>';
+    if(shouldScroll) scrollToMeetingList();
   }catch(e){ body.innerHTML='<div class="panel">'+errorHtml(e.message)+'</div>'; }
 }
 
@@ -2242,26 +2270,17 @@ function meetingTable(meetings, selectedStatus){
 }
 
 function clearMeetingFilters(status){ state.meetingFilters={from:'',to:'',agent:'ALL',status:status||'ALL'}; }
-function readMeetingFilterControls(){
-  const f=state.meetingFilters || (state.meetingFilters={from:'',to:'',agent:'ALL',status:'ALL'});
-  const from=$('#mtg-from'), to=$('#mtg-to'), agent=$('#mtg-agent'), status=$('#mtg-status');
-  if(from) f.from=from.value || '';
-  if(to) f.to=to.value || '';
-  if(agent) f.agent=agent.value || f.agent || 'ALL';
-  if(status) f.status=status.value || 'ALL';
-  return f;
-}
-ACTIONS['mtg-apply']=()=>{ readMeetingFilterControls(); loadMeetingPipeline(); };
-ACTIONS['mtg-refresh']=()=>{ readMeetingFilterControls(); loadMeetingPipeline(); };
-ACTIONS['mtg-clear']=()=>{ clearMeetingFilters('ALL'); renderMeetingPipeline($('#tab-content')); };
-ACTIONS['mtg-quick']=(el,d)=>{ quickRange(state.meetingFilters,d.q); renderMeetingPipeline($('#tab-content')); };
-ACTIONS['mtg-filter-status']=(el,d)=>{ const f=readMeetingFilterControls(); f.status=d.status||'ALL'; const st=$('#mtg-status'); if(st) st.value=f.status; loadMeetingPipeline(); };
-ACTIONS['mtg-filter-all']=()=>{ const f=readMeetingFilterControls(); f.status='ALL'; const st=$('#mtg-status'); if(st) st.value='ALL'; loadMeetingPipeline(); };
+ACTIONS['mtg-apply']=async ()=>{ await applyMeetingFilters(true); };
+ACTIONS['mtg-clear']=async ()=>{ clearMeetingFilters('ALL'); await renderMeetingPipeline($('#tab-content')); };
+ACTIONS['mtg-quick']=async (el,d)=>{ quickRange(state.meetingFilters,d.q); await renderMeetingPipeline($('#tab-content')); scrollToMeetingList(); };
+ACTIONS['mtg-filter-status']=async (el,d)=>{ const f=syncMeetingFilterState(); f.status=d.status||'ALL'; const st=$('#mtg-status'); if(st) st.value=f.status; await loadMeetingPipeline(true); };
+ACTIONS['mtg-filter-all']=async ()=>{ const f=syncMeetingFilterState(); f.status='ALL'; const st=$('#mtg-status'); if(st) st.value='ALL'; await loadMeetingPipeline(true); };
+ACTIONS['mtg-refresh']=async ()=>{ await applyMeetingFilters(true); };
 ACTIONS['mtg-import']=async (el)=>{
   if(!(state.user && state.user.role==='MANAGER')){ toast('Only managers can import old meeting calls.','error'); return; }
-  if(!confirm('Admin tool only: import old meeting-set call logs into Meetings Booked? Existing meeting records will not be duplicated.')) return;
+  if(!confirm('Admin only: import old meeting-set call logs into Meetings Booked? Existing meeting records will not be duplicated.')) return;
   el.disabled=true; el.textContent='Importing…';
-  try{ const res=await api('importMeetingCalls',{}); toast('Imported '+(res.created||0)+' old meeting(s). Existing skipped: '+(res.skippedExisting||0)+'.','success'); state.meetingFilters.status='SCHEDULED'; await renderMeetingPipeline($('#tab-content')); }
+  try{ const res=await api('importMeetingCalls',{}); toast('Imported '+(res.created||0)+' meeting(s). Existing skipped: '+(res.skippedExisting||0)+'. Showing SCHEDULED now.','success'); clearMeetingFilters('SCHEDULED'); await renderMeetingPipeline($('#tab-content')); }
   catch(e){ toast(e.message,'error'); }
   finally{ el.disabled=false; el.textContent='Admin: Import Old Meeting Calls'; }
 };
@@ -2568,7 +2587,7 @@ ACTIONS['run-health-check']=async (el)=>{
         '<div class="stat"><b>'+esc(r.companyMasterRows||0)+'</b><span>Company Master rows</span></div>'+ 
         '<div class="stat"><b>'+esc(r.activeUsers||0)+'</b><span>Active users</span></div>'+ 
       '</div>'+ 
-      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the B17 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
+      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the matching B17.3 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
       '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Sheet</th><th>Status</th><th>Rows</th></tr></thead><tbody>'+sheetRows+'</tbody></table></div>'+
       '<p style="color:var(--muted);margin-top:10px"><b>Backup rule:</b> do not keep backup .gs files active inside Apps Script. Keep backups as TXT, ZIP, or outside the Apps Script project.</p>';
     toast('Health check complete','success');
