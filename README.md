@@ -1,53 +1,28 @@
-SLINGSHOTZ CRM — B17.3 MEETINGS FILTER CLICK FIX
+SLINGSHOTZ CRM — B17.4 MEETINGS BOOKED STABLE FILTER REBUILD
 
-BUILD NUMBER
-B17.3 MEETINGS FILTER CLICK FIX
+Purpose:
+Fix Meetings Booked behavior after B17.2/B17.3 filter issues.
 
-PURPOSE
-Fix the Meetings Booked filter UX after B17.2:
-- Apply Filters button must be clickable and visibly work.
-- Refresh List must reload the filtered meeting list.
-- Status/card clicks must keep the current date and agent filters.
-- Clicking filters/cards should move the user down to the meeting list so they do not need to scroll manually.
+Changes:
+- Rebuilt Meetings Booked filter UI as a real form with direct submit/click handlers.
+- Apply Filters and Refresh List now reload the filtered list.
+- Status dropdown auto-applies.
+- Status cards keep current date and agent filters.
+- The meeting list now appears immediately after the filter summary, before status cards, so the user does not need to scroll through cards first.
+- Meeting date filters use MEETING DATE only. They do not alter meeting records and do not fall back to Created At.
+- Added user-facing note: filters only change what is shown; they never change stored meeting dates.
 
-FILES
-1. Slingshotz_index_B17_3_MEETINGS_FILTER_CLICK_FIX.html
-   - Rename/paste as GitHub index.html.
-2. api_build17_3_MEETINGS_FILTER_CLICK_FIX_COPY_PASTE.txt
-   - Paste into Apps Script api.gs.
-3. api_build17_3_MEETINGS_FILTER_CLICK_FIX.gs
-   - Backup copy only. Do not add as extra .gs file in Apps Script.
-
-PRESERVED FROM B17.2 / B17.1 / B17
-- BIDDING REQUIREMENT = Bid Pipeline + owner follow-up action.
-- BIDDING REQUIREMENT should not remain as ordinary 0/3 cold-call target.
+Preserved:
+- B17.2 workflow rules including BIDDING REQUIREMENT = Bid Pipeline + owner follow-up action.
 - Import Old Meeting Calls remains manager-only/admin-only.
 - B17.1 audit safety patch.
-- B16 security polish.
-- B15 health check.
-- B14 users/settings.
-- B13 events leads.
-- B12 activity log/call history.
-- B11.1 company database label cleanup.
-- B10 agent performance dashboard.
-- B9.1 manager dashboard drilldown.
-- B8.8 meeting outcome review.
-- B8.7 direct Save Call fix.
-- Branded HTML meeting email template.
-- Correct API_URL.
+- B17 UX polish, B16 security, B15 health check, B14 Users/Settings, B13 Events Leads, B12 Activity Log, B11 Company Database, B10 Agent Performance, B9.1 dashboard, B8.8 meetings outcome review, B8.7 direct Save Call, branded email template, correct API_URL.
 
-DEPLOYMENT CHECKLIST
-1. In GitHub, replace the live index.html with Slingshotz_index_B17_3_MEETINGS_FILTER_CLICK_FIX.html.
-2. In GitHub, upload this README.
-3. In Apps Script, replace only api.gs with api_build17_3_MEETINGS_FILTER_CLICK_FIX_COPY_PASTE.txt.
-4. Do not add backup .gs files inside Apps Script.
-5. Save Apps Script.
-6. Deploy > Manage deployments > pencil/edit > Version: New version > Deploy.
-7. Hard refresh the CRM.
-8. Confirm the UI shows: B17.3 MEETINGS FILTER CLICK FIX.
-9. Test Meetings Booked:
-   - Select a date range.
-   - Click Apply Filters.
-   - Confirm the list updates and scrolls into view.
-   - Click a status card.
-   - Confirm the same date/agent filters remain and the list scrolls into view.
+Deployment:
+1. Replace GitHub index.html with the B17.4 frontend.
+2. Replace Apps Script api.gs with the B17.4 backend copy-paste text.
+3. Do not keep backup .gs files inside Apps Script.
+4. Save Apps Script.
+5. Deploy > Manage deployments > Edit pencil > New version > Deploy.
+6. Hard refresh CRM.
+7. Confirm the app shows B17.4 MEETINGS BOOKED STABLE FILTER REBUILD.
