@@ -1,28 +1,33 @@
-SLINGSHOTZ CRM — B17.4 MEETINGS BOOKED STABLE FILTER REBUILD
+SLINGSHOTZ CRM — B17.4 Dock Tile Icon Add-On
 
 Purpose:
-Fix Meetings Booked behavior after B17.2/B17.3 filter issues.
+Adds a distinct Slingshotz CRM tile/icon for browser bookmarks, mobile home screen, and desktop dock shortcuts.
 
-Changes:
-- Rebuilt Meetings Booked filter UI as a real form with direct submit/click handlers.
-- Apply Filters and Refresh List now reload the filtered list.
-- Status dropdown auto-applies.
-- Status cards keep current date and agent filters.
-- The meeting list now appears immediately after the filter summary, before status cards, so the user does not need to scroll through cards first.
-- Meeting date filters use MEETING DATE only. They do not alter meeting records and do not fall back to Created At.
-- Added user-facing note: filters only change what is shown; they never change stored meeting dates.
+Important:
+This does not change CRM logic. It preserves the working B17.4 Meetings Booked behavior.
 
-Preserved:
-- B17.2 workflow rules including BIDDING REQUIREMENT = Bid Pipeline + owner follow-up action.
-- Import Old Meeting Calls remains manager-only/admin-only.
-- B17.1 audit safety patch.
-- B17 UX polish, B16 security, B15 health check, B14 Users/Settings, B13 Events Leads, B12 Activity Log, B11 Company Database, B10 Agent Performance, B9.1 dashboard, B8.8 meetings outcome review, B8.7 direct Save Call, branded email template, correct API_URL.
+Files to upload to GitHub root, beside index.html:
+- index.html  (use Slingshotz_index_B17_4_WITH_DOCK_TILE_ICON.html as the replacement content/file)
+- favicon.ico
+- slingshotz-tile-16.png
+- slingshotz-tile-32.png
+- slingshotz-tile-48.png
+- slingshotz-tile-64.png
+- slingshotz-tile-128.png
+- slingshotz-tile-180.png
+- slingshotz-tile-192.png
+- slingshotz-tile-256.png
+- slingshotz-tile-512.png
+- manifest.webmanifest
 
-Deployment:
-1. Replace GitHub index.html with the B17.4 frontend.
-2. Replace Apps Script api.gs with the B17.4 backend copy-paste text.
-3. Do not keep backup .gs files inside Apps Script.
-4. Save Apps Script.
-5. Deploy > Manage deployments > Edit pencil > New version > Deploy.
-6. Hard refresh CRM.
-7. Confirm the app shows B17.4 MEETINGS BOOKED STABLE FILTER REBUILD.
+Apps Script:
+No backend change is needed. Do not touch api.gs for this icon update.
+
+After upload:
+1. Commit the files in GitHub.
+2. Hard refresh the CRM.
+3. Remove the old dock/home-screen shortcut if it already exists.
+4. Add the app shortcut again so the device picks up the new icon.
+
+Current CRM build preserved:
+B17.4 MEETINGS BOOKED STABLE FILTER REBUILD
