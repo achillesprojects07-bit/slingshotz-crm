@@ -273,7 +273,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.4 MEETINGS BOOKED STABLE FILTER REBUILD</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.5 DEMO RESET BUTTON RESTORE</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -293,7 +293,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17.4 MEETINGS BOOKED STABLE FILTER REBUILD</span>
+      <span class="build-tag" id="app-build-tag">B17.5 DEMO RESET BUTTON RESTORE</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -348,7 +348,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17.4 MEETINGS BOOKED STABLE FILTER REBUILD';
+const APP_BUILD = 'B17.5 DEMO RESET BUTTON RESTORE';
 // B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -2541,6 +2541,10 @@ async function renderUsers(c){
       '<p style="color:var(--muted);margin-top:2px">Use this after every upload to confirm the frontend can reach the backend and the backend is the expected deployed version.</p></div>'+ 
       '<button class="btn btn-primary btn-sm" data-action="run-health-check">Run Health Check</button></div>'+ 
       '<div id="health-check-box" style="color:var(--muted);font-size:13px">Not checked yet.</div></div>'+ 
+    (state.mode === 'DEMO' ? '<div class="panel"><div class="section-title"><div><h2>Reset Demo Data</h2>'+
+      '<p style="color:var(--muted);margin-top:2px">Manager-only safety reset for DEMO working sheets. This does not touch COMPANY MASTER, USERS, or LIVE data.</p></div>'+
+      '<button class="btn btn-danger btn-sm" data-action="demo-reset">Reset Demo Data</button></div>'+
+      '<div class="security-note"><b>Protected reset:</b> Clears only DEMO call logs, target lists, app activity, event master, company status, bid pipeline, and meeting pipeline. You must type RESET DEMO before it runs.</div></div>' : '')+
     '<div class="panel"><div class="section-title"><div><h2>Live Mode / Security Protection</h2>'+ 
       '<p style="color:var(--muted);margin-top:2px">B17 makes the app easier to use on desktop and mobile without removing the protected CRM features.</p></div></div>'+ 
       '<div class="stats-grid">'+
@@ -2598,7 +2602,7 @@ ACTIONS['run-health-check']=async (el)=>{
   try{
     const r=await api('healthCheck',{});
     const sheetRows=(r.sheets||[]).map(s=>'<tr><td>'+esc(s.sheet)+'</td><td>'+(s.exists?'✓':'⚠')+'</td><td>'+esc(s.rows)+'</td></tr>').join('');
-    const mismatch = String(r.backendVersion||'').indexOf('16.')!==0;
+    const mismatch = String(r.backendVersion||'').indexOf('17.5')!==0;
     if(box) box.innerHTML=
       '<div class="stats-grid">'+
         '<div class="stat"><b>'+esc(APP_BUILD)+'</b><span>Frontend build</span></div>'+ 
@@ -2606,7 +2610,7 @@ ACTIONS['run-health-check']=async (el)=>{
         '<div class="stat"><b>'+esc(r.companyMasterRows||0)+'</b><span>Company Master rows</span></div>'+ 
         '<div class="stat"><b>'+esc(r.activeUsers||0)+'</b><span>Active users</span></div>'+ 
       '</div>'+ 
-      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the matching B17.3 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
+      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the matching B17.5 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
       '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Sheet</th><th>Status</th><th>Rows</th></tr></thead><tbody>'+sheetRows+'</tbody></table></div>'+
       '<p style="color:var(--muted);margin-top:10px"><b>Backup rule:</b> do not keep backup .gs files active inside Apps Script. Keep backups as TXT, ZIP, or outside the Apps Script project.</p>';
     toast('Health check complete','success');
@@ -3177,3 +3181,4 @@ initLogin();
 </script>
 </body>
 </html>
+
