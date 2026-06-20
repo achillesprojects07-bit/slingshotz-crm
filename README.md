@@ -1,33 +1,38 @@
-SLINGSHOTZ CRM — B17.4 Dock Tile Icon Add-On
+SLINGSHOTZ CRM — B17.5 DEMO RESET BUTTON RESTORE
 
 Purpose:
-Adds a distinct Slingshotz CRM tile/icon for browser bookmarks, mobile home screen, and desktop dock shortcuts.
+Restore the visible manager-only Reset Demo Data button in Users / Settings while preserving the working B17.4 Meetings Booked filter behavior and dock tile icon setup.
 
-Important:
-This does not change CRM logic. It preserves the working B17.4 Meetings Booked behavior.
+What changed:
+1. Added visible Users / Settings → Reset Demo Data panel in DEMO mode.
+2. Button is manager-only because Users / Settings is manager-only.
+3. Reset still requires typed confirmation: RESET DEMO.
+4. Reset calls backend resetDemoActivity with confirmToken=CONFIRM-RESET.
+5. Backend version updated to 17.5.0.
+6. Health Check now expects B17.5 backend.
 
-Files to upload to GitHub root, beside index.html:
-- index.html  (use Slingshotz_index_B17_4_WITH_DOCK_TILE_ICON.html as the replacement content/file)
-- favicon.ico
-- slingshotz-tile-16.png
-- slingshotz-tile-32.png
-- slingshotz-tile-48.png
-- slingshotz-tile-64.png
-- slingshotz-tile-128.png
-- slingshotz-tile-180.png
-- slingshotz-tile-192.png
-- slingshotz-tile-256.png
-- slingshotz-tile-512.png
-- manifest.webmanifest
+What is preserved:
+- B17.4 Meetings Booked stable filter rebuild
+- Working date/status/agent meeting filters
+- Direct Apply Filters / Refresh List handlers
+- Meeting filters never alter stored meeting dates
+- Dock tile icon files and manifest
+- B17.2 bidding requirement workflow
+- B17.1 audit safety patch
+- B8.7 direct Save Call fix
+- Branded HTML meeting email template
+- Correct API_URL
 
-Apps Script:
-No backend change is needed. Do not touch api.gs for this icon update.
+Deployment checklist:
+1. Replace GitHub index.html with Slingshotz_index_B17_5_DEMO_RESET_BUTTON_RESTORE.html.
+2. Keep/upload the existing icon files, favicon.ico, and manifest.webmanifest beside index.html.
+3. Replace Apps Script api.gs with api_build17_5_DEMO_RESET_BUTTON_RESTORE_COPY_PASTE.txt.
+4. Do not add backup .gs files inside Apps Script.
+5. Save Apps Script.
+6. Deploy → Manage deployments → pencil/edit → New version → Deploy.
+7. Hard refresh the CRM.
+8. Confirm the app shows: B17.5 DEMO RESET BUTTON RESTORE.
+9. In DEMO mode as manager, go to Users / Settings and confirm Reset Demo Data appears.
 
-After upload:
-1. Commit the files in GitHub.
-2. Hard refresh the CRM.
-3. Remove the old dock/home-screen shortcut if it already exists.
-4. Add the app shortcut again so the device picks up the new icon.
-
-Current CRM build preserved:
-B17.4 MEETINGS BOOKED STABLE FILTER REBUILD
+Safety note:
+Reset Demo Data clears only DEMO working sheets. It does not clear COMPANY MASTER, USERS, or LIVE sheets.
