@@ -273,7 +273,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.5 DEMO RESET BUTTON RESTORE</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.6 DAILY TARGET FOLLOW-UP SYNC</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -293,7 +293,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17.5 DEMO RESET BUTTON RESTORE</span>
+      <span class="build-tag" id="app-build-tag">B17.6 DAILY TARGET FOLLOW-UP SYNC</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -348,8 +348,8 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17.5 DEMO RESET BUTTON RESTORE';
-// B11 preservation rule: Add Targets reads COMPANY MASTER. My Target List reads only DAILY ACTION LIST. Duplicate pending targets remain blocked.
+const APP_BUILD = 'B17.6 DAILY TARGET FOLLOW-UP SYNC';
+// B11 preservation rule: Company Database reads COMPANY MASTER. My Daily Target reads DAILY ACTION LIST plus due owner follow-ups from CALL LOG. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
 const MEETING_UPDATE_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
@@ -729,7 +729,7 @@ $('#logout-btn').addEventListener('click', logout);
 
 const AGENT_TABS = [
   {id:'dash', label:'Dashboard', render: renderAgentDashboard},
-  {id:'targets', label:'My Target List', render: renderTargets},
+  {id:'targets', label:'My Daily Target', render: renderTargets},
   {id:'add', label:'Company Database', render: renderAddTargets},
   {id:'followups', label:'My Follow-Ups', render: renderFollowups},
   {id:'bids', label:'Bid Pipeline', render: renderBidPipeline},
@@ -884,19 +884,45 @@ function retryAttemptHtml(t){
 }
 
 function targetTable(rows){
-  if(!rows.length) return emptyHtml('🎯','Your target list is empty. Add companies from the Company Database tab.');
-  return '<div class="table-wrap"><table><thead><tr><th>Company</th><th>Phone</th><th>Attempts</th><th>Last Result</th><th>Last Call</th><th>Added</th><th></th></tr></thead><tbody>'+
-    rows.map(t=>'<tr>'+
-      '<td><b>'+esc(t.companyName)+'</b><br><small style="color:var(--muted)">'+esc(t.companyId)+'</small></td>'+
-      '<td style="min-width:170px">'+(phoneLine(t)||'\u2014')+'</td>'+
-      '<td>'+retryAttemptHtml(t)+'</td>'+
-      '<td>'+(t.lastResult?resultPill(t.lastResult):'<span class="pill pill-neutral">NOT CALLED YET</span>')+'</td>'+
-      '<td class="nowrap">'+esc(t.lastCallDate||'—')+'</td>'+
-      '<td class="nowrap">'+esc(t.addedAt||'')+'</td>'+
-      '<td class="nowrap">'+callActions(t.companyId,t.companyName)+
-        ' <button class="btn btn-sm btn-danger" data-action="remove-target" data-cid="'+esc(t.companyId)+'">Remove</button></td>'+
+  if(!rows.length) return emptyHtml('🎯','Your daily work queue is empty. Add companies from the Company Database, or check My Follow-Ups for future-dated follow-ups.');
+  const workPill = (t)=>{
+    const wt = String(t.workType||'').toUpperCase();
+    if(wt==='BID FOLLOW-UP DUE') return '<span class="pill pill-meet">BID FOLLOW-UP</span>';
+    if(wt==='FOLLOW-UP DUE') return '<span class="pill pill-good">FOLLOW-UP DUE</span>';
+    if(wt==='RETRY CALL') return '<span class="pill pill-retry">RETRY CALL</span>';
+    return '<span class="pill pill-neutral">NEW CALL</span>';
+  };
+  const dueText = (t)=>{
+    if(!t.followUpDate) return esc(t.addedAt||'');
+    const ds = String(t.dueState||'');
+    const cls = ds==='overdue' ? 'due-overdue' : (ds==='due-today' ? 'due-today' : 'due-upcoming');
+    return '<span class="'+cls+'"><b>Due:</b> '+esc(t.followUpDate)+'</span>';
+  };
+  const actions = (t)=>{
+    const wt = String(t.workType||'').toUpperCase();
+    let html = callActions(t.companyId,t.companyName);
+    if(wt==='BID FOLLOW-UP DUE') html += ' <button class="btn btn-sm" data-action="open-bids" data-cid="'+esc(t.companyId)+'">Bid Pipeline</button>';
+    html += ' <button class="btn btn-sm" data-action="view-history" data-cid="'+esc(t.companyId)+'" data-cname="'+esc(t.companyName)+'">History</button>';
+    if(!wt || wt==='NEW CALL' || wt==='RETRY CALL') html += ' <button class="btn btn-sm btn-danger" data-action="remove-target" data-cid="'+esc(t.companyId)+'">Remove</button>';
+    return html;
+  };
+  return '<div class="table-wrap"><table><thead><tr><th>Company</th><th>Phone</th><th>Work Type</th><th>Attempts</th><th>Last Result</th><th>Due / Added</th><th></th></tr></thead><tbody>'+ 
+    rows.map(t=>'<tr>'+ 
+      '<td><b>'+esc(t.companyName)+'</b><br><small style="color:var(--muted)">'+esc(t.companyId)+'</small></td>'+ 
+      '<td style="min-width:170px">'+(phoneLine(t)||'—')+'</td>'+ 
+      '<td>'+workPill(t)+'</td>'+ 
+      '<td>'+retryAttemptHtml(t)+'</td>'+ 
+      '<td>'+(t.lastResult?resultPill(t.lastResult):'<span class="pill pill-neutral">NOT CALLED YET</span>')+'</td>'+ 
+      '<td class="nowrap">'+dueText(t)+'</td>'+ 
+      '<td class="nowrap">'+actions(t)+'</td>'+ 
     '</tr>').join('')+'</tbody></table></div>';
 }
+
+ACTIONS['open-bids'] = (el,d)=>{
+  state.bidFilters = state.bidFilters || {stage:'',agent:'',search:'',from:'',to:''};
+  state.bidFilters.search = d.cid || '';
+  renderTab('bids');
+};
 
 /* ========================= AGENT: DASHBOARD =========================== */
 
@@ -1075,9 +1101,9 @@ function renderDashDetail(){
 
 async function renderTargets(c){
   const data = await api('getMyActions', {user: state.user.code});
-  c.innerHTML = '<div class="panel"><div class="section-title"><h2>My Target List ('+data.count+')</h2>'+
+  c.innerHTML = '<div class="panel"><div class="section-title"><h2>My Daily Target / Work Queue ('+data.count+')</h2>'+
     '<button class="btn btn-sm" data-action="reload-tab">Refresh</button></div>'+
-    targetTable(data.targets)+'</div>';
+    '<p style="color:var(--muted);font-size:12.5px;margin:4px 0 12px">Includes fresh targets, retry calls, and follow-ups due today/overdue. Bid follow-ups appear here when due and stay connected to Bid Pipeline.</p>'+targetTable(data.targets)+'</div>';
 }
 
 ACTIONS['remove-target'] = async (el,d)=>{
@@ -1102,7 +1128,7 @@ async function renderAddTargets(c){
   c.innerHTML =
     '<div class="panel">'+
     '<div class="section-title"><div><h2>Company Database ('+q.count+' companies)</h2>'+
-    '<p style="color:var(--muted);font-size:12.5px;margin-top:2px">Source: <b>COMPANY MASTER</b>. Adding a target writes only to <b>DAILY ACTION LIST</b>. My Target List does not read the full company database.</p></div>'+
+    '<p style="color:var(--muted);font-size:12.5px;margin-top:2px">Source: <b>COMPANY MASTER</b>. Adding a target writes only to <b>DAILY ACTION LIST</b>. My Daily Target shows fresh targets, retry calls, and follow-ups due today/overdue.</p></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
     '<button class="btn btn-primary btn-sm" data-action="company-new">+ Add Company</button>'+
     '<button class="btn btn-sm" data-action="queue-clear-filters">Clear Filters</button>'+
@@ -2602,7 +2628,7 @@ ACTIONS['run-health-check']=async (el)=>{
   try{
     const r=await api('healthCheck',{});
     const sheetRows=(r.sheets||[]).map(s=>'<tr><td>'+esc(s.sheet)+'</td><td>'+(s.exists?'✓':'⚠')+'</td><td>'+esc(s.rows)+'</td></tr>').join('');
-    const mismatch = String(r.backendVersion||'').indexOf('17.5')!==0;
+    const mismatch = String(r.backendVersion||'').indexOf('17.6')!==0;
     if(box) box.innerHTML=
       '<div class="stats-grid">'+
         '<div class="stat"><b>'+esc(APP_BUILD)+'</b><span>Frontend build</span></div>'+ 
@@ -2610,7 +2636,7 @@ ACTIONS['run-health-check']=async (el)=>{
         '<div class="stat"><b>'+esc(r.companyMasterRows||0)+'</b><span>Company Master rows</span></div>'+ 
         '<div class="stat"><b>'+esc(r.activeUsers||0)+'</b><span>Active users</span></div>'+ 
       '</div>'+ 
-      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the matching B17.5 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
+      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the matching B17.6 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
       '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Sheet</th><th>Status</th><th>Rows</th></tr></thead><tbody>'+sheetRows+'</tbody></table></div>'+
       '<p style="color:var(--muted);margin-top:10px"><b>Backup rule:</b> do not keep backup .gs files active inside Apps Script. Keep backups as TXT, ZIP, or outside the Apps Script project.</p>';
     toast('Health check complete','success');
@@ -3181,4 +3207,3 @@ initLogin();
 </script>
 </body>
 </html>
-
