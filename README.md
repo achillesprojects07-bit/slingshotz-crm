@@ -1,38 +1,47 @@
-SLINGSHOTZ CRM — B17.5 DEMO RESET BUTTON RESTORE
+SLINGSHOTZ CRM — B17.6 DAILY TARGET FOLLOW-UP SYNC
 
 Purpose:
-Restore the visible manager-only Reset Demo Data button in Users / Settings while preserving the working B17.4 Meetings Booked filter behavior and dock tile icon setup.
+Make My Daily Target the agent's real daily work queue.
 
 What changed:
-1. Added visible Users / Settings → Reset Demo Data panel in DEMO mode.
-2. Button is manager-only because Users / Settings is manager-only.
-3. Reset still requires typed confirmation: RESET DEMO.
-4. Reset calls backend resetDemoActivity with confirmToken=CONFIRM-RESET.
-5. Backend version updated to 17.5.0.
-6. Health Check now expects B17.5 backend.
+1. My Daily Target now includes fresh targets from DAILY ACTION LIST.
+2. My Daily Target now includes retry calls due for NO ANSWER / BUSY.
+3. My Daily Target now includes owner-only follow-ups due today or overdue from CALL LOG.
+4. BIDDING REQUIREMENT follow-ups appear as BID FOLLOW-UP in My Daily Target when due.
+5. Bid follow-ups stay connected to Bid Pipeline and include a Bid Pipeline action button.
+6. If the same company is both a fresh target and a due follow-up, the due follow-up appears once so the list is not cluttered.
 
-What is preserved:
-- B17.4 Meetings Booked stable filter rebuild
-- Working date/status/agent meeting filters
-- Direct Apply Filters / Refresh List handlers
-- Meeting filters never alter stored meeting dates
-- Dock tile icon files and manifest
-- B17.2 bidding requirement workflow
+Preserved:
+- B17.5 Demo Reset Button Restore
+- B17.4 working Meetings Booked stable filters
+- B17.2 BIDDING REQUIREMENT = Bid Pipeline + owner follow-up
 - B17.1 audit safety patch
+- B16 live/security polish
+- B15 health check
+- B14 users/settings
+- B13 events leads
+- B12 activity log/call history
+- B11.1 company database label cleanup
+- B10 agent performance
+- B9.1 manager dashboard
+- B8.8 meeting outcome review
 - B8.7 direct Save Call fix
-- Branded HTML meeting email template
-- Correct API_URL
+- branded HTML meeting email template
+- correct API_URL
 
-Deployment checklist:
-1. Replace GitHub index.html with Slingshotz_index_B17_5_DEMO_RESET_BUTTON_RESTORE.html.
-2. Keep/upload the existing icon files, favicon.ico, and manifest.webmanifest beside index.html.
-3. Replace Apps Script api.gs with api_build17_5_DEMO_RESET_BUTTON_RESTORE_COPY_PASTE.txt.
+Upload instructions:
+1. GitHub index.html = B17.6 frontend.
+2. GitHub README = this README.
+3. Apps Script api.gs = B17.6 backend copy-paste.
 4. Do not add backup .gs files inside Apps Script.
 5. Save Apps Script.
 6. Deploy → Manage deployments → pencil/edit → New version → Deploy.
 7. Hard refresh the CRM.
-8. Confirm the app shows: B17.5 DEMO RESET BUTTON RESTORE.
-9. In DEMO mode as manager, go to Users / Settings and confirm Reset Demo Data appears.
+8. Confirm the app shows B17.6 DAILY TARGET FOLLOW-UP SYNC.
 
-Safety note:
-Reset Demo Data clears only DEMO working sheets. It does not clear COMPANY MASTER, USERS, or LIVE sheets.
+Test:
+1. In DEMO, log BIDDING REQUIREMENT with today's follow-up date or no follow-up date.
+2. Confirm it appears in Bid Pipeline.
+3. Confirm it appears in My Follow-Ups.
+4. Confirm it appears in My Daily Target as BID FOLLOW-UP when due today/overdue.
+5. Confirm it does not appear as a normal 0/3 cold-call target.
