@@ -1,47 +1,35 @@
-SLINGSHOTZ CRM — B17.6 DAILY TARGET FOLLOW-UP SYNC
+SLINGSHOTZ CRM — B17.7 RETRY FLOW CLEANUP
 
 Purpose:
-Make My Daily Target the agent's real daily work queue.
+Clean up Retry Call behavior so retry attempts do not behave like follow-ups.
 
 What changed:
-1. My Daily Target now includes fresh targets from DAILY ACTION LIST.
-2. My Daily Target now includes retry calls due for NO ANSWER / BUSY.
-3. My Daily Target now includes owner-only follow-ups due today or overdue from CALL LOG.
-4. BIDDING REQUIREMENT follow-ups appear as BID FOLLOW-UP in My Daily Target when due.
-5. Bid follow-ups stay connected to Bid Pipeline and include a Bid Pipeline action button.
-6. If the same company is both a fresh target and a due follow-up, the due follow-up appears once so the list is not cluttered.
+1. NO ANSWER and BUSY / TRY AGAIN are treated as Retry Calls only.
+2. Retry calls no longer show or use Follow-Up Date in the Log Call modal.
+3. If a date is accidentally sent for a retry result, the backend clears it before saving.
+4. Retry attempts continue to count toward the 3-attempt cap.
+5. After 3 retry attempts, the target moves to RETRY CAP REACHED / Review Company Details instead of asking for another follow-up date.
 
 Preserved:
-- B17.5 Demo Reset Button Restore
-- B17.4 working Meetings Booked stable filters
-- B17.2 BIDDING REQUIREMENT = Bid Pipeline + owner follow-up
-- B17.1 audit safety patch
-- B16 live/security polish
-- B15 health check
-- B14 users/settings
-- B13 events leads
-- B12 activity log/call history
-- B11.1 company database label cleanup
-- B10 agent performance
-- B9.1 manager dashboard
-- B8.8 meeting outcome review
+- B17.6 Daily Target follow-up sync
+- Bid follow-ups due today/overdue appear in My Daily Target
+- B17.5 Demo Reset button
+- B17.4 stable Meetings Booked filters
+- B17.2 Bidding Requirement workflow
 - B8.7 direct Save Call fix
-- branded HTML meeting email template
-- correct API_URL
+- Branded meeting email template
+- Correct API_URL
+- Dock tile icon setup
 
-Upload instructions:
-1. GitHub index.html = B17.6 frontend.
-2. GitHub README = this README.
-3. Apps Script api.gs = B17.6 backend copy-paste.
-4. Do not add backup .gs files inside Apps Script.
+Upload checklist:
+1. GitHub: replace index.html with B17.7 frontend.
+2. GitHub: upload this README.
+3. Keep existing icon files, manifest.webmanifest, and favicon.ico.
+4. Apps Script: replace api.gs with B17.7 backend copy-paste.
 5. Save Apps Script.
-6. Deploy → Manage deployments → pencil/edit → New version → Deploy.
-7. Hard refresh the CRM.
-8. Confirm the app shows B17.6 DAILY TARGET FOLLOW-UP SYNC.
+6. Deploy > Manage deployments > pencil/edit > New version > Deploy.
+7. Hard refresh CRM.
+8. Confirm UI shows B17.7 RETRY FLOW CLEANUP.
 
-Test:
-1. In DEMO, log BIDDING REQUIREMENT with today's follow-up date or no follow-up date.
-2. Confirm it appears in Bid Pipeline.
-3. Confirm it appears in My Follow-Ups.
-4. Confirm it appears in My Daily Target as BID FOLLOW-UP when due today/overdue.
-5. Confirm it does not appear as a normal 0/3 cold-call target.
+Important rule:
+Do not keep backup .gs files active inside Apps Script. Store backups in GitHub or as TXT/ZIP files only.
