@@ -273,7 +273,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.6 DAILY TARGET FOLLOW-UP SYNC</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.7 RETRY FLOW CLEANUP</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -293,7 +293,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17.6 DAILY TARGET FOLLOW-UP SYNC</span>
+      <span class="build-tag" id="app-build-tag">B17.7 RETRY FLOW CLEANUP</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -348,7 +348,7 @@ const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17.6 DAILY TARGET FOLLOW-UP SYNC';
+const APP_BUILD = 'B17.7 RETRY FLOW CLEANUP';
 // B11 preservation rule: Company Database reads COMPANY MASTER. My Daily Target reads DAILY ACTION LIST plus due owner follow-ups from CALL LOG. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
 const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
@@ -2628,7 +2628,7 @@ ACTIONS['run-health-check']=async (el)=>{
   try{
     const r=await api('healthCheck',{});
     const sheetRows=(r.sheets||[]).map(s=>'<tr><td>'+esc(s.sheet)+'</td><td>'+(s.exists?'✓':'⚠')+'</td><td>'+esc(s.rows)+'</td></tr>').join('');
-    const mismatch = String(r.backendVersion||'').indexOf('17.6')!==0;
+    const mismatch = String(r.backendVersion||'').indexOf('17.5')!==0;
     if(box) box.innerHTML=
       '<div class="stats-grid">'+
         '<div class="stat"><b>'+esc(APP_BUILD)+'</b><span>Frontend build</span></div>'+ 
@@ -2636,7 +2636,7 @@ ACTIONS['run-health-check']=async (el)=>{
         '<div class="stat"><b>'+esc(r.companyMasterRows||0)+'</b><span>Company Master rows</span></div>'+ 
         '<div class="stat"><b>'+esc(r.activeUsers||0)+'</b><span>Active users</span></div>'+ 
       '</div>'+ 
-      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the matching B17.6 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
+      (mismatch?'<div class="error-box" style="margin-top:10px">⚠ Frontend/backend version mismatch. Deploy the matching B17.5 api.gs as a new Apps Script version.</div>':'<div class="review-status-box review-status-reviewed" style="margin-top:10px"><b>Health Check Passed</b>Backend reached successfully. API URL is responding.</div>')+
       '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Sheet</th><th>Status</th><th>Rows</th></tr></thead><tbody>'+sheetRows+'</tbody></table></div>'+
       '<p style="color:var(--muted);margin-top:10px"><b>Backup rule:</b> do not keep backup .gs files active inside Apps Script. Keep backups as TXT, ZIP, or outside the Apps Script project.</p>';
     toast('Health check complete','success');
@@ -2983,7 +2983,7 @@ async function openCallModal(companyId, companyName, historyOnly){
       '<h3 style="margin-bottom:9px">Previous Call History</h3><div id="cm-history">'+loadingHtml('Loading history…')+'</div>' :
       '<div class="form-grid">'+
         '<div class="full"><label>Call Result *</label><select id="cm-result"><option value="">Select result…</option>'+callResultOptions()+'</select></div>'+ 
-        '<div><label id="cm-date-label">Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+ 
+        '<div id="cm-date-wrap"><label id="cm-date-label">Next Follow-Up Date</label><input type="date" id="cm-fudate"></div>'+ 
         '<div class="full"><small id="cm-date-help" style="color:var(--muted)">Follow-up date is required for follow-up results. Meeting date is required for meeting-set results.</small></div>'+ 
         '<div><label>Client Event Date</label><input type="date" id="cm-evdate"></div>'+ 
         '<div class="full"><label>Client Event Name</label><input id="cm-evname" placeholder="e.g. Product launch, trade show booth…"></div>'+ 
@@ -3001,9 +3001,18 @@ async function openCallModal(companyId, companyName, historyOnly){
     const updateDateLabel=()=>{
       const r=String(resultSel.value||'').toUpperCase();
       const lab=$('#cm-date-label'), help=$('#cm-date-help');
-      if(MEETING.has(r)){ if(lab) lab.textContent='Meeting Date *'; if(help) help.textContent='Required because this is a booked meeting.'; }
-      else if(FOLLOWUP_RESULTS_FRONT.has(r)){ if(lab) lab.textContent='Next Follow-Up Date *'; if(help) help.textContent='Required so it appears correctly in Follow-Ups Due.'; }
-      else { if(lab) lab.textContent='Next Follow-Up Date'; if(help) help.textContent='Optional unless this is a follow-up or meeting result.'; }
+      const wrap=$('#cm-date-wrap'), input=$('#cm-fudate');
+      if(RETRY.has(r)){
+        if(input) input.value='';
+        if(wrap) wrap.style.display='none';
+        if(help) help.textContent='Retry calls do not use follow-up dates. After 3 attempts, this moves to Review Company Details / Retry Cap Reached.';
+      }
+      else {
+        if(wrap) wrap.style.display='';
+        if(MEETING.has(r)){ if(lab) lab.textContent='Meeting Date *'; if(help) help.textContent='Required because this is a booked meeting.'; }
+        else if(FOLLOWUP_RESULTS_FRONT.has(r)){ if(lab) lab.textContent='Next Follow-Up Date *'; if(help) help.textContent='Required so it appears correctly in Follow-Ups Due.'; }
+        else { if(lab) lab.textContent='Next Follow-Up Date'; if(help) help.textContent='Optional unless this is a follow-up or meeting result.'; }
+      }
     };
     resultSel.addEventListener('change', updateDateLabel); updateDateLabel();
   }
@@ -3057,7 +3066,8 @@ ACTIONS['call-save']=async (el,d)=>{
   const dateEl=$('#cm-fudate');
   const errBox=$('#cm-save-error');
   const result=String(resultEl ? resultEl.value : '').toUpperCase().trim();
-  const followUpDate=dateEl ? dateEl.value : '';
+  const rawFollowUpDate=dateEl ? dateEl.value : '';
+  const followUpDate=RETRY.has(result) ? '' : rawFollowUpDate;
   if(errBox){ errBox.style.display='none'; errBox.innerHTML=''; }
 
   if(!result){ toast('Please select a call result','error'); return; }
@@ -3092,7 +3102,7 @@ ACTIONS['call-save']=async (el,d)=>{
     if(!payload.user || !payload.by || !payload.pin){
       throw new Error('Missing logged-in user or PIN. Please logout and login again.');
     }
-    console.log('B8.7 Save Call payload', payload);
+    console.log('B17.7 Save Call payload', payload);
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(), 20000);
     let res, txt, data;
