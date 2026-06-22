@@ -273,7 +273,7 @@
 <div id="login-view">
   <div class="login-card">
     <div class="login-logo">SLING<span>SHOTZ</span></div>
-    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.7 RETRY FLOW CLEANUP</b></div>
+    <div class="login-sub">Telemarketing CRM — sign in to continue · <b id="login-build-tag">B17.8 BID + MEETING FOLLOW-UP LOGIC</b></div>
     <div class="field">
       <label for="login-user">User</label>
       <select id="login-user"><option value="">Loading users…</option></select>
@@ -293,7 +293,7 @@
     <div class="hdr-inner">
       <div class="brand">SLING<span>SHOTZ</span> CRM</div>
       <span class="badge badge-demo" id="mode-badge">DEMO</span>
-      <span class="build-tag" id="app-build-tag">B17.7 RETRY FLOW CLEANUP</span>
+      <span class="build-tag" id="app-build-tag">B17.8 BID + MEETING FOLLOW-UP LOGIC</span>
       <button class="btn btn-sm" id="mode-switch" style="display:none">Switch mode</button>
       <div class="hdr-spacer"></div>
       <div class="user-chip">
@@ -335,7 +335,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwov4NPqYNVKUokep_8crBA
 
 const CALL_RESULT_GROUPS = [
   {label:'No Contact / Try Again', results:['NO ANSWER','BUSY / TRY AGAIN']},
-  {label:'Follow-Up / Nurture', results:['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']},
+  {label:'Follow-Up / Nurture', results:['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT','NO REQUIREMENT FOR NOW']},
   {label:'Meetings Booked', results:['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']},
   {label:'Review Company Details', results:['WRONG NUMBER','NUMBER UNREACHABLE']},
   {label:'Closed / Not Leads', results:['NO REQUIREMENT','NOT INTERESTED']}
@@ -344,14 +344,16 @@ const CALL_RESULTS = CALL_RESULT_GROUPS.flatMap(g=>g.results);
 const MEANINGFUL = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','BIDDING REQUIREMENT','COMPANY PROFILE SENT','COMPANY PROFILE MEETING SET','EVENT IDENTIFIED','PROJECT BRIEFING MEETING SET']);
 const RETRY = new Set(['NO ANSWER','BUSY / TRY AGAIN']);
 const MEETING = new Set(['COMPANY PROFILE MEETING SET','PROJECT BRIEFING MEETING SET']);
-const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT']);
+const FOLLOWUP_RESULTS_FRONT = new Set(['CONTACT PERSON NOT AVAILABLE','ASKED TO CALL BACK','COMPANY PROFILE SENT','EVENT IDENTIFIED','BIDDING REQUIREMENT','NO REQUIREMENT FOR NOW']);
 const CLOSED = new Set(['NO REQUIREMENT','NOT INTERESTED']);
 const REVIEW_DETAILS = new Set(['WRONG NUMBER','NUMBER UNREACHABLE']);
 const PAGE_SIZE = 50;
-const APP_BUILD = 'B17.7 RETRY FLOW CLEANUP';
+const APP_BUILD = 'B17.8 BID + MEETING FOLLOW-UP LOGIC';
 // B11 preservation rule: Company Database reads COMPANY MASTER. My Daily Target reads DAILY ACTION LIST plus due owner follow-ups from CALL LOG. Duplicate pending targets remain blocked.
 const BID_STAGES = ['IDENTIFIED','QUALIFYING','PROPOSAL PREP','SUBMITTED','AWARDED','LOST','NO DECISION'];
-const BID_CLOSED_STAGES = new Set(['AWARDED','LOST','NO DECISION']);
+const BID_CLOSED_STAGES = new Set(['AWARDED','LOST']);
+const NO_DECISION_REASONS_FRONT = ['Client paused the project','Client has no update','Client said they will decide later','No final answer after follow-up'];
+const NO_DECISION_NEXT_STEPS_FRONT = ['Follow up again later','Long-term follow-up','Parked - no active follow-up'];
 const MEETING_UPDATE_STATUSES = ['SCHEDULED','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
 const MEETING_FILTER_STATUSES = ['SCHEDULED','NEEDS MEETING OUTCOME','DONE','RESCHEDULED','CANCELLED','NO SHOW'];
 function normalizeMeetingStatus(s){ s=String(s||'SCHEDULED').toUpperCase().trim(); return s==='PREPARING' ? 'SCHEDULED' : s; }
@@ -842,7 +844,9 @@ function followupCards(rows){
   return '<div class="fu-grid">'+rows.map(f=>'<div class="fu-card'+(f.dueState==='overdue'||f.dueState==='due-today'?' fu-urgent':'')+'">'+
     '<div class="co">'+esc(f.companyName)+'</div>'+
     '<div class="meta">'+esc(f.companyId)+' · Owner: <b>'+esc(f.agent)+'</b> · Logged '+esc(f.loggedAt)+'</div>'+
-    '<div>'+resultPill(f.result)+' <span class="pill pill-neutral">Owner-only follow-up</span></div>'+
+    '<div>'+resultPill(f.result)+' <span class="pill pill-neutral">Owner-only follow-up</span>'+
+    (f.followUpType==='LONG-TERM FOLLOW-UP' ? ' <span class="pill pill-meet">LONG-TERM</span>' : '')+
+    (f.source ? ' <span class="pill pill-neutral">'+esc(f.source)+'</span>' : '')+'</div>'+
     '<div>'+dueLabel(f)+'</div>'+
     (f.clientEventName?'<div class="meta">🎪 '+esc(f.clientEventName)+(f.clientEventDate?' ('+esc(f.clientEventDate)+')':'')+'</div>':'')+
     (f.notes?'<div class="notes">'+esc(f.notes)+'</div>':'')+
@@ -850,6 +854,7 @@ function followupCards(rows){
     '<div class="fu-actions" style="flex-wrap:wrap">'+
       '<button class="btn btn-sm btn-primary" data-action="open-call" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">Log Follow-Up</button>'+
       '<button class="btn btn-sm" data-action="reschedule-followup" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'" data-result="'+esc(f.result)+'">Reschedule</button>'+
+      (String(f.source||'').toUpperCase()==='BID PIPELINE' ? '<button class="btn btn-sm" data-action="open-bids" data-cid="'+esc(f.companyId)+'">Bid Pipeline</button>' : '')+
       '<button class="btn btn-sm" data-action="close-followup" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">Close</button>'+
       '<button class="btn btn-sm" data-action="view-history" data-cid="'+esc(f.companyId)+'" data-cname="'+esc(f.companyName)+'">History</button>'+ 
     '</div>'+ 
@@ -862,6 +867,7 @@ function followupSummaryCards(rows){
     all: rows.length,
     urgent: rows.filter(f=>f.dueState==='overdue'||f.dueState==='due-today').length,
     upcoming: rows.filter(f=>f.dueState==='upcoming').length,
+    longTerm: rows.filter(f=>f.followUpType==='LONG-TERM FOLLOW-UP').length,
     needsDate: rows.filter(f=>f.dueState==='needs-date'||f.needsDate).length
   };
   const card = (key,label,count) => '<div class="stat-card'+(state.fuRange===key?' selected':'')+'" data-action="fu-filter" data-range="'+key+'"><div class="num">'+count+'</div><div class="lbl">'+label+'</div></div>';
@@ -869,6 +875,7 @@ function followupSummaryCards(rows){
     card('all','All Open Follow-Ups',counts.all)+
     card('urgent','Overdue / Due Today',counts.urgent)+
     card('upcoming','Upcoming',counts.upcoming)+
+    card('long-term','Long-Term',counts.longTerm)+
     card('needs-date','Needs Follow-Up Date',counts.needsDate)+
   '</div>';
 }
@@ -1247,6 +1254,7 @@ async function renderFollowups(c){
   const sorted = [...rep.followups].sort((a,b)=>(DUE_ORDER[a.dueState]??4)-(DUE_ORDER[b.dueState]??4));
   const filtered = state.fuRange==='urgent' ? sorted.filter(f=>f.dueState==='overdue'||f.dueState==='due-today')
                  : state.fuRange==='upcoming' ? sorted.filter(f=>f.dueState==='upcoming')
+                 : state.fuRange==='long-term' ? sorted.filter(f=>f.followUpType==='LONG-TERM FOLLOW-UP')
                  : state.fuRange==='needs-date' ? sorted.filter(f=>f.dueState==='needs-date'||f.needsDate)
                  : sorted;
   c.innerHTML = '<div class="panel">'+
@@ -1256,6 +1264,7 @@ async function renderFollowups(c){
         '<option value="all"'+(state.fuRange==='all'?' selected':'')+'>All open</option>'+
         '<option value="urgent"'+(state.fuRange==='urgent'?' selected':'')+'>Overdue / Due today</option>'+
         '<option value="upcoming"'+(state.fuRange==='upcoming'?' selected':'')+'>Upcoming</option>'+
+        '<option value="long-term"'+(state.fuRange==='long-term'?' selected':'')+'>Long-Term</option>'+
         '<option value="needs-date"'+(state.fuRange==='needs-date'?' selected':'')+'>Needs date</option>'+
       '</select>'+
       '<button class="btn btn-sm" data-action="reload-tab">Refresh</button>'+
@@ -2161,18 +2170,24 @@ ACTIONS['bid-stage-modal']=(el,d)=>{
     '<div class="modal-body"><div class="form-grid">'+
       '<div class="full"><label>Bid</label><input value="'+esc(d.title||d.bid)+'" disabled></div>'+
       '<div><label>New Stage *</label><select id="bs-stage">'+bidStageOptions(String(d.stage||'').toUpperCase(),false)+'</select></div>'+
+      '<div><label>Next Follow-Up Date</label><input type="date" id="bs-nextdate"></div>'+
       '<div><label>Outcome Date</label><input type="date" id="bs-outcome-date" value="'+todayStr()+'"></div>'+
-      '<div class="full"><label>Outcome</label><input id="bs-outcome" placeholder="Required only for Awarded / Lost / No Decision"></div>'+
-      '<div class="full"><label>Outcome Notes</label><textarea id="bs-notes" rows="3"></textarea></div>'+
-    '</div><p style="color:var(--muted);font-size:12.5px;margin-top:10px">Outcome and outcome date are required when closing a bid.</p></div>'+
+      '<div class="full"><label>Outcome</label><input id="bs-outcome" placeholder="Required for Awarded / Lost"></div>'+
+      '<div class="full"><label>No Decision Reason</label><select id="bs-nodecision-reason"><option value="">Choose only if stage is NO DECISION</option>'+NO_DECISION_REASONS_FRONT.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('')+'</select></div>'+
+      '<div class="full"><label>No Decision Next Step</label><select id="bs-nodecision-step">'+NO_DECISION_NEXT_STEPS_FRONT.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('')+'</select></div>'+
+      '<div class="full"><label>Outcome / Follow-Up Notes</label><textarea id="bs-notes" rows="3" placeholder="What should happen next?"></textarea></div>'+
+    '</div><p style="color:var(--muted);font-size:12.5px;margin-top:10px">Submitted bids require a next follow-up date. No Decision requires a reason and a next step.</p></div>'+
     '<div class="modal-foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="bid-stage-save" data-bid="'+esc(d.bid)+'">Save Stage</button></div>'
   );
 };
 
 ACTIONS['bid-stage-save']=async (el,d)=>{
   const newStage=$('#bs-stage').value;
-  const params={bidId:d.bid,newStage,outcome:$('#bs-outcome').value.trim(),outcomeDate:$('#bs-outcome-date').value,outcomeNotes:$('#bs-notes').value.trim()};
-  if(BID_CLOSED_STAGES.has(newStage) && (!params.outcome || !params.outcomeDate)){ toast('Outcome and outcome date are required when closing a bid','error'); return; }
+  const params={bidId:d.bid,newStage,outcome:$('#bs-outcome').value.trim(),outcomeDate:$('#bs-outcome-date').value,outcomeNotes:$('#bs-notes').value.trim(),nextFollowUpDate:$('#bs-nextdate').value,noDecisionReason:$('#bs-nodecision-reason').value,noDecisionNextStep:$('#bs-nodecision-step').value};
+  if(BID_CLOSED_STAGES.has(newStage) && (!params.outcome || !params.outcomeDate)){ toast('Outcome and outcome date are required for Awarded / Lost','error'); return; }
+  if(newStage==='SUBMITTED' && !params.nextFollowUpDate){ toast('Next Follow-Up Date is required for submitted bids','error'); return; }
+  if(newStage==='NO DECISION' && !params.noDecisionReason){ toast('Choose a No Decision reason','error'); return; }
+  if(newStage==='NO DECISION' && params.noDecisionNextStep!=='Parked - no active follow-up' && !params.nextFollowUpDate){ toast('Choose a next follow-up date, unless the bid is Parked','error'); return; }
   el.disabled=true; el.textContent='Saving…';
   try{ await api('updateBidStage',params); toast('Bid updated','success'); closeModal(); renderTab('bids'); }
   catch(e){ toast(e.message,'error'); el.disabled=false; el.textContent='Save Stage'; }
