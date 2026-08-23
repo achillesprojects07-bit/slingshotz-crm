@@ -1,0 +1,77 @@
+{
+  "phase": 4,
+  "version": "1.3.0-phase4",
+  "status": "PASS_WITH_REAL_DEVICE_AND_TIME_BEHAVIOR_QA_PENDING",
+  "technical_checks": [
+    [
+      "Phase 3 speaking/audio preserved",
+      "PASS"
+    ],
+    [
+      "Review state independent from curriculum",
+      "PASS"
+    ],
+    [
+      "Review records persisted in localStorage state",
+      "PASS"
+    ],
+    [
+      "Due/Weak/Unknown queues implemented",
+      "PASS"
+    ],
+    [
+      "Mark Unknown implemented",
+      "PASS"
+    ],
+    [
+      "Review result scheduling implemented",
+      "PASS"
+    ],
+    [
+      "No hard gate on lesson progression",
+      "PASS"
+    ],
+    [
+      "Review session advances after Again",
+      "PASS"
+    ],
+    [
+      "Diagnostics include review engine",
+      "PASS"
+    ],
+    [
+      "No service worker added",
+      "PASS"
+    ],
+    [
+      "Real browser persistence/time-based due behavior",
+      "MANUAL_TEST_REQUIRED"
+    ]
+  ],
+  "learning_checks": [
+    [
+      "Intervals 1/3/7/21/60 present",
+      "PASS"
+    ],
+    [
+      "Weakness evidence includes lesson mistakes",
+      "PASS"
+    ],
+    [
+      "Pronunciation self-ratings can influence review priority",
+      "PASS"
+    ],
+    [
+      "Unknown items prioritized",
+      "PASS"
+    ],
+    [
+      "Review separate from new learning",
+      "PASS"
+    ],
+    [
+      "No endless repeat loop",
+      "PASS"
+    ]
+  ]
+}

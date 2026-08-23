@@ -1,0 +1,35 @@
+{
+  "phase": 2,
+  "version": "1.1.0-phase2",
+  "status": "PASS_WITH_REAL_DEVICE_QA_PENDING",
+  "counts": {
+    "available_cycles": 1,
+    "lessons": 6,
+    "core_items": 48,
+    "practice_items": 24
+  },
+  "technical": [
+    "PASS: five routes",
+    "PASS: lesson engine",
+    "PASS: schema v1→v2 migration",
+    "PASS: resume state",
+    "PASS: sequential unlocking",
+    "PASS: library independent of progress",
+    "PASS: no service worker"
+  ],
+  "learning": [
+    "PASS: 8 contextual core items per lesson",
+    "PASS: 4 varied practice activities per lesson",
+    "PASS: no hard review gate",
+    "PASS: integrated production in lesson 6"
+  ],
+  "greek": [
+    "PASS: Standard Modern Greek checked",
+    "PASS: natural meaning separated from literal structure",
+    "PASS: register notes included",
+    "PASS: common alternatives noted where useful"
+  ],
+  "pending": [
+    "Real iPhone Safari visual/interaction QA after GitHub Pages deployment"
+  ]
+}
